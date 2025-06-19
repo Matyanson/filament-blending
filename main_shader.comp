@@ -1,0 +1,267 @@
+#version 430
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba8, binding = 0) uniform image2D target_image;
+
+layout(std430, binding = 1) buffer BasePoints {
+    vec3 base_points[];
+};
+
+layout(std430, binding = 2) buffer Tetrahedrons {
+    ivec4 tets[];
+};
+
+layout(std430, binding = 3) buffer HullTriangles {
+    ivec3 hull_tris[];
+};
+
+layout(std430, binding = 4) buffer OutputIndicies {
+    ivec4 out_indexes[];
+};
+
+layout(std430, binding = 5) buffer OutputCoords {
+    vec4 out_bary[];
+};
+
+// Convert sRGB (0-1) to linear RGB
+vec3 srgbToLinear(vec3 c) {
+    vec3 lt = step(vec3(0.04045), c);
+    vec3 low  = c / 12.92;
+    vec3 high = pow((c + 0.055) / 1.055, vec3(2.4));
+    return mix(low, high, lt);
+}
+
+// Convert linear RGB to CIE-XYZ (D65)
+vec3 linearRgbToXyz(vec3 c) {
+    const mat3 M = mat3(
+        0.4124564, 0.3575761, 0.1804375,
+        0.2126729, 0.7151522, 0.0721750,
+        0.0193339, 0.1191920, 0.9503041
+    );
+    return M * c;
+}
+
+// Pivot helper for XYZ -> Lab
+float pivotLab(float t) {
+    const float eps = 0.008856;  // 216/24389
+    const float kap = 903.3;     // 24389/27
+    return t > eps
+        ? pow(t, 1.0 / 3.0)
+        : (kap * t + 16.0) / 116.0;
+}
+
+// Convert CIE-XYZ to CIE-Lab (D65 reference white)
+vec3 xyzToLab(vec3 xyz) {
+    // Reference white (D65)
+    const vec3 white = vec3(0.95047, 1.00000, 1.08883);
+    vec3 v = vec3(
+        pivotLab(xyz.x / white.x),
+        pivotLab(xyz.y / white.y),
+        pivotLab(xyz.z / white.z)
+    );
+    return vec3(
+        116.0 * v.y - 16.0,      // L*
+        500.0 * (v.x - v.y),     // a*
+        200.0 * (v.y - v.z)      // b*
+    );
+}
+
+// Full sRGB -> CIE‑Lab
+vec3 rgb2lab(vec3 srgb) {
+    vec3 lin = srgbToLinear(srgb);
+    vec3 xyz = linearRgbToXyz(lin);
+    return xyzToLab(xyz);
+}
+
+// Euclidean distance in Lab space
+float colorDistance(vec3 rgb1, vec3 rgb2) {
+    vec3 lab1 = rgb2lab(rgb1);
+    vec3 lab2 = rgb2lab(rgb2);
+    return length(lab1 - lab2);
+}
+
+
+vec2 barycentric_1d(vec3 p, vec3 a, vec3 b) {
+    vec3 ab = b - a;
+    float denom = dot(ab, ab);
+    float v = (denom == 0.0) ? 0.0 : dot(p - a, ab) / denom;
+    return vec2(1.0 - v, v);
+}
+
+vec3 barycentric_2d(vec3 p, vec3 a, vec3 b, vec3 c) {
+    vec3 v0 = b - a;
+    vec3 v1 = c - a;
+    vec3 v2 = p - a;
+
+    float d00 = dot(v0, v0);
+    float d01 = dot(v0, v1);
+    float d11 = dot(v1, v1);
+    float d20 = dot(v2, v0);
+    float d21 = dot(v2, v1);
+
+    float denom = d00 * d11 - d01 * d01;
+    if (denom == 0.0) return vec3(1.0, 0.0, 0.0);
+
+    float invDen = 1.0 / denom;
+    float v = (d11 * d20 - d01 * d21) * invDen;
+    float w = (d00 * d21 - d01 * d20) * invDen;
+    return vec3(1.0 - v - w, v, w);
+}
+
+vec4 barycentric_3d(vec3 p, vec3 a, vec3 b, vec3 c, vec3 d) {
+    mat3 M = mat3(b - a, c - a, d - a);
+    vec3 Y = p - a;
+
+    vec3 vwt = inverse(M) * Y;
+    float u = 1.0 - vwt.x - vwt.y - vwt.z;
+    return vec4(u, vwt);
+}
+
+vec3 clampBary(vec3 bary) {
+    bary = max(bary, vec3(0.0));
+    return bary / dot(bary, vec3(1.0));
+}
+
+// vec3 barycentric2DLab(vec3 A, vec3 B, vec3 C, vec3 X) {
+//     // Precompute Lab(X)
+//     vec3 labX = rgb2lab(X);
+
+//     // Initial barycentric (u,v), w = 1-u-v
+//     vec2 uv = barycentric_2d(X, A, B, C);
+//     float u = uv.x;
+//     float v = uv.y;
+//     // Clamp & renormalize
+//     u = clamp(u, 0.0, 1.0);
+//     v = clamp(v, 0.0, 1.0);
+//     float w = 1.0 - u - v;
+//     float sum = u + v + w;
+//     if (sum > 0.0) {
+//         u /= sum; v /= sum; w = 1.0 - u - v;
+//     } else {
+//         u = v = 0.3333333; w = 0.3333333;
+//     }
+
+//     // Evaluate initial distance
+//     vec3 M_rgb = u*A + v*B + w*C;
+//     float bestDist = length(rgb2lab(M_rgb) - labX);
+
+//     // Local search step
+//     float k = 0.1;
+//     for (int iter = 0; iter < 100; ++iter) {
+//         if (k < 1e-4) break;
+//         bool improved = false;
+
+//         // Try four neighbor moves: (±k,0), (0,±k)
+//         for (int move = 0; move < 4; ++move) {
+//             float du = 0.0;
+//             float dv = 0.0;
+//             if (move == 0) du =  k;
+//             if (move == 1) du = -k;
+//             if (move == 2) dv =  k;
+//             if (move == 3) dv = -k;
+
+//             float u2 = u + du;
+//             float v2 = v + dv;
+//             float w2 = 1.0 - u2 - v2;
+//             // skip invalid
+//             if (u2 < 0.0 || v2 < 0.0 || w2 < 0.0) continue;
+
+//             // compute distance in Lab
+//             vec3 M2 = u2*A + v2*B + w2*C;
+//             float dist2 = length(rgb2lab(M2) - labX);
+
+//             if (dist2 < bestDist) {
+//                 u = u2; v = v2; w = w2;
+//                 bestDist = dist2;
+//                 improved = true;
+//                 break; // accept first improving move
+//             }
+//         }
+
+//         if (!improved) {
+//             k *= 0.5;
+//         }
+//     }
+
+//     return vec3(u, v, w);
+// }
+
+
+bool point_in_tet(vec3 p, vec3 a, vec3 b, vec3 c, vec3 d) {
+    float sign = dot(cross(b - a, c - a), d - a);
+    float sign0 = dot(cross(b - a, c - a), p - a);
+    float sign1 = dot(cross(c - a, d - a), p - a);
+    float sign2 = dot(cross(d - a, b - a), p - a);
+    float sign3 = dot(cross(c - b, d - b), p - b);
+    return sign0 * sign >= 0 && sign1 * sign >= 0 && sign2 * sign >= 0 && sign3 * sign >= 0;
+}
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 img_size = imageSize(target_image);
+    if (pos.x >= img_size.x || pos.y >= img_size.y) return;
+
+    int buffer_index = pos.y * img_size.x + pos.x;
+    vec4 color = imageLoad(target_image, pos);     // rearange to match RGBA format
+    vec3 p = color.rgb;
+
+    int found = -1;
+    for (int i = 0; i < tets.length(); ++i) {
+        ivec4 tet = tets[i];
+        vec3 a = base_points[tet.x];
+        vec3 b = base_points[tet.y];
+        vec3 c = base_points[tet.z];
+        vec3 d = base_points[tet.w];
+        if (point_in_tet(p, a, b, c, d)) {
+            vec4 bary = barycentric_3d(p, a, b, c, d);
+            out_indexes[buffer_index] = tet;
+            out_bary[buffer_index] = bary;
+            vec3 proj = bary.x * a + bary.y * b + bary.z * c + bary.w * d;
+            imageStore(target_image, pos, vec4(proj, 1.0));
+            found = 1;
+            break;
+        }
+    }
+
+    if (found < 0) {
+        float min_dist = 1e10;
+        ivec3 best_tri = ivec3(0);
+        vec3 best_bary = vec3(1.0) / 3.0;
+        vec3 best_color = vec3(0);
+        for (int i = 0; i < hull_tris.length(); ++i) {
+            ivec3 tri = hull_tris[i];
+            vec3 a = base_points[tri.x];
+            vec3 b = base_points[tri.y];
+            vec3 c = base_points[tri.z];
+            vec3 bary = barycentric_2d(p, a, b, c);
+            bary = clampBary(bary);
+            vec3 proj = bary.x * a + bary.y * b + bary.z * c;
+            // float dist = length(p - proj);
+            float dist = colorDistance(p, proj);
+            if (dist < min_dist) {
+                min_dist = dist;
+                best_tri = tri;
+                best_bary = bary;
+                best_color = proj;
+            }
+        }
+
+        if(best_bary.x == 0.0) {
+            best_bary.x = -1;
+            best_tri.x = -1;
+        }
+        if(best_bary.y == 0.0) {
+            best_bary.y = -1;
+            best_tri.y = -1;
+        }
+        if(best_bary.z == 0.0) {
+            best_bary.z = -1;
+            best_tri.z = -1;
+        }
+
+        out_indexes[buffer_index] = ivec4(best_tri, -1);
+        out_bary[buffer_index] = vec4(best_bary, -1);
+        imageStore(target_image, pos, vec4(best_color, 1.0));
+    }
+}

@@ -2,7 +2,9 @@
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
-layout(rgba8, binding = 0) uniform image2D target_image;
+layout(rgba32f, binding = 0) uniform image2D target_image;
+
+layout(rgba32f, binding=6) writeonly uniform image2D  output_image;
 
 layout(std430, binding = 1) buffer BasePoints {
     vec3 base_points[];
@@ -187,14 +189,20 @@ vec3 clampBary(vec3 bary) {
 //     return vec3(u, v, w);
 // }
 
+bool onSameTriangleSide(vec3 a, vec3 b, vec3 c, vec3 x, vec3 y) {
+    // For each plane of the tetrahedron, check if the point is on the same side as the remaining vertex
+    vec3 normal = cross(b - a, c - a);
+    float NdotX = dot(normal, x - a);
+    float NdotY = dot(normal, y - a);
+
+    return sign(NdotX) == sign(NdotY);
+}
 
 bool point_in_tet(vec3 p, vec3 a, vec3 b, vec3 c, vec3 d) {
-    float sign = dot(cross(b - a, c - a), d - a);
-    float sign0 = dot(cross(b - a, c - a), p - a);
-    float sign1 = dot(cross(c - a, d - a), p - a);
-    float sign2 = dot(cross(d - a, b - a), p - a);
-    float sign3 = dot(cross(c - b, d - b), p - b);
-    return sign0 * sign >= 0 && sign1 * sign >= 0 && sign2 * sign >= 0 && sign3 * sign >= 0;
+    return onSameTriangleSide(a, b, c, d, p) &&
+           onSameTriangleSide(b, c, d, a, p) &&
+           onSameTriangleSide(c, d, a, b, p) &&
+           onSameTriangleSide(d, a, b, c, p);
 }
 
 void main() {
@@ -218,7 +226,7 @@ void main() {
             out_indexes[buffer_index] = tet;
             out_bary[buffer_index] = bary;
             vec3 proj = bary.x * a + bary.y * b + bary.z * c + bary.w * d;
-            imageStore(target_image, pos, vec4(proj, 1.0));
+            imageStore(output_image, pos, vec4(proj, 1.0));
             found = 1;
             break;
         }
@@ -247,21 +255,21 @@ void main() {
             }
         }
 
-        if(best_bary.x == 0.0) {
-            best_bary.x = -1;
-            best_tri.x = -1;
-        }
-        if(best_bary.y == 0.0) {
-            best_bary.y = -1;
-            best_tri.y = -1;
-        }
-        if(best_bary.z == 0.0) {
-            best_bary.z = -1;
-            best_tri.z = -1;
-        }
+        // if(best_bary.x == 0.0) {
+        //     best_bary.x = -1;
+        //     best_tri.x = -1;
+        // }
+        // if(best_bary.y == 0.0) {
+        //     best_bary.y = -1;
+        //     best_tri.y = -1;
+        // }
+        // if(best_bary.z == 0.0) {
+        //     best_bary.z = -1;
+        //     best_tri.z = -1;
+        // }
 
         out_indexes[buffer_index] = ivec4(best_tri, -1);
         out_bary[buffer_index] = vec4(best_bary, -1);
-        imageStore(target_image, pos, vec4(best_color, 1.0));
+        imageStore(output_image, pos, vec4(best_color, 1.0));
     }
 }

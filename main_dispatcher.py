@@ -6,7 +6,14 @@ import ctypes
 import glfw
 
 
-def bind_image_texture(path, binding_index, access=GL_READ_ONLY):
+def bind_image_texture(path, binding_index, dtype, access=GL_READ_ONLY):
+    if dtype == np.uint8:
+        internalformat = GL_RGBA8
+    elif dtype == np.float32:
+        internalformat = GL_RGBA32F
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+    
     img = Image.open(path).convert('RGBA')
     img_data = np.array(img).astype(np.uint8)
     print("input image pixels: \n", img_data)
@@ -14,12 +21,12 @@ def bind_image_texture(path, binding_index, access=GL_READ_ONLY):
 
     tex = glGenTextures(1)
     glBindTexture(GL_TEXTURE_2D, tex)
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height)
+    glTexStorage2D(GL_TEXTURE_2D, 1, internalformat, width, height)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
                     GL_RGBA, GL_UNSIGNED_BYTE, img_data)
 
     # Bind as image2D instead of sampler2D
-    glBindImageTexture(binding_index, tex, 0, GL_FALSE, 0, access, GL_RGBA8)
+    glBindImageTexture(binding_index, tex, 0, GL_FALSE, 0, access, internalformat)
 
     return width, height, tex
 
@@ -80,10 +87,10 @@ def run_shader(target_img_path, base_points, tets, hull_tris, shader_path):
 
     shader = load_compute_shader(shader_path)
 
-    width, height, target_tex = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
+    width, height, target_tex = bind_image_texture(target_img_path, 0, np.float32, GL_READ_WRITE)
 
     # Prepare input buffers
-    create_ssbo(np.array(base_points, dtype=np.float32), 1)
+    create_ssbo(np.array(base_points, dtype=np.float32), 1, np.float32)
     create_ssbo(np.array(tets, dtype=np.int32), 2, dtype=np.int32)
     create_ssbo(np.array(hull_tris, dtype=np.int32), 3, dtype=np.int32)
 
@@ -94,6 +101,8 @@ def run_shader(target_img_path, base_points, tets, hull_tris, shader_path):
 
     data_template = np.zeros((num_pixels, 4), dtype=np.float32)
     output_coords = create_ssbo(data_template, 5, dtype=np.float32)
+
+    _, _, output_tex = bind_image_texture(target_img_path, 6, np.float32, GL_WRITE_ONLY)
 
     # Dispatch shader
     glUseProgram(shader)
@@ -109,7 +118,7 @@ def run_shader(target_img_path, base_points, tets, hull_tris, shader_path):
     result_coords = result_coords.reshape((height, width, 4))
 
     # save texture
-    read_and_save_tex(target_tex, "output/mixed.png", width, height)
+    read_and_save_tex(output_tex, "output/mixed.png", width, height)
 
 
     glfw.terminate()

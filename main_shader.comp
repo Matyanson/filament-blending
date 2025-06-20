@@ -2,9 +2,9 @@
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
-layout(rgba32f, binding = 0) uniform image2D target_image;
+layout(rgba8, binding = 0) uniform image2D target_image;
 
-layout(rgba32f, binding=6) writeonly uniform image2D  output_image;
+layout(rgba8, binding=6) writeonly uniform image2D  output_image;
 
 layout(std430, binding = 1) buffer BasePoints {
     vec3 base_points[];
@@ -211,7 +211,7 @@ void main() {
     if (pos.x >= img_size.x || pos.y >= img_size.y) return;
 
     int buffer_index = pos.y * img_size.x + pos.x;
-    vec4 color = imageLoad(target_image, pos);     // rearange to match RGBA format
+    vec4 color = imageLoad(target_image, pos) / 255.0;  // scale to 0-1 range
     vec3 p = color.rgb;
 
     int found = -1;
@@ -223,10 +223,10 @@ void main() {
         vec3 d = base_points[tet.w];
         if (point_in_tet(p, a, b, c, d)) {
             vec4 bary = barycentric_3d(p, a, b, c, d);
+            vec3 proj = bary.x * a + bary.y * b + bary.z * c + bary.w * d;
             out_indexes[buffer_index] = tet;
             out_bary[buffer_index] = bary;
-            vec3 proj = bary.x * a + bary.y * b + bary.z * c + bary.w * d;
-            imageStore(output_image, pos, vec4(proj, 1.0));
+            imageStore(output_image, pos, vec4(proj * 255.0, 1.0));
             found = 1;
             break;
         }
@@ -269,7 +269,7 @@ void main() {
         // }
 
         out_indexes[buffer_index] = ivec4(best_tri, -1);
-        out_bary[buffer_index] = vec4(best_bary, -1);
-        imageStore(output_image, pos, vec4(best_color, 1.0));
+        out_bary[buffer_index] = vec4(best_bary, 0.0);
+        imageStore(output_image, pos, vec4(best_color * 255.0, 1.0));
     }
 }

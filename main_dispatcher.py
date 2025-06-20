@@ -6,14 +6,7 @@ import ctypes
 import glfw
 
 
-def bind_image_texture(path, binding_index, dtype, access=GL_READ_ONLY):
-    if dtype == np.uint8:
-        internalformat = GL_RGBA8
-    elif dtype == np.float32:
-        internalformat = GL_RGBA32F
-    else:
-        raise ValueError(f"Unsupported dtype: {dtype}")
-    
+def bind_image_texture(path, binding_index, dtype, access=GL_READ_ONLY):    
     img = Image.open(path).convert('RGBA')
     img_data = np.array(img).astype(np.uint8)
     print("input image pixels: \n", img_data)
@@ -21,12 +14,12 @@ def bind_image_texture(path, binding_index, dtype, access=GL_READ_ONLY):
 
     tex = glGenTextures(1)
     glBindTexture(GL_TEXTURE_2D, tex)
-    glTexStorage2D(GL_TEXTURE_2D, 1, internalformat, width, height)
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height)
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
                     GL_RGBA, GL_UNSIGNED_BYTE, img_data)
 
     # Bind as image2D instead of sampler2D
-    glBindImageTexture(binding_index, tex, 0, GL_FALSE, 0, access, internalformat)
+    glBindImageTexture(binding_index, tex, 0, GL_FALSE, 0, access, GL_RGBA8)
 
     return width, height, tex
 
@@ -87,7 +80,7 @@ def run_shader(target_img_path, base_points, tets, hull_tris, shader_path):
 
     shader = load_compute_shader(shader_path)
 
-    width, height, target_tex = bind_image_texture(target_img_path, 0, np.float32, GL_READ_WRITE)
+    width, height, target_tex = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
 
     # Prepare input buffers
     create_ssbo(np.array(base_points, dtype=np.float32), 1, np.float32)
@@ -102,7 +95,7 @@ def run_shader(target_img_path, base_points, tets, hull_tris, shader_path):
     data_template = np.zeros((num_pixels, 4), dtype=np.float32)
     output_coords = create_ssbo(data_template, 5, dtype=np.float32)
 
-    _, _, output_tex = bind_image_texture(target_img_path, 6, np.float32, GL_WRITE_ONLY)
+    _, _, output_tex = bind_image_texture(target_img_path, 6, GL_WRITE_ONLY)
 
     # Dispatch shader
     glUseProgram(shader)

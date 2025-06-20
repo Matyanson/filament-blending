@@ -202,7 +202,7 @@ void main() {
     if (pos.x >= img_size.x || pos.y >= img_size.y) return;
 
     int buffer_index = pos.y * img_size.x + pos.x;
-    vec4 color = imageLoad(target_image, pos) / 255.0;  // scale to 0-1 range
+    vec4 color = imageLoad(target_image, pos);
     vec3 p = color.rgb;
 
     int found = -1;
@@ -217,7 +217,7 @@ void main() {
             vec3 proj = bary.x * a + bary.y * b + bary.z * c + bary.w * d;
             out_indexes[buffer_index] = tet;
             out_bary[buffer_index] = bary;
-            imageStore(output_image, pos, vec4(proj * 255.0, 1.0));
+            imageStore(output_image, pos, vec4(proj, 1.0));
             found = 1;
             break;
         }
@@ -261,6 +261,6 @@ void main() {
 
         out_indexes[buffer_index] = ivec4(best_tri, -1);
         out_bary[buffer_index] = vec4(best_bary, 0.0);
-        imageStore(output_image, pos, vec4(best_color * 255.0, 1.0));
+        imageStore(output_image, pos, vec4(best_color, 1.0));
     }
 }

@@ -189,20 +189,11 @@ vec3 clampBary(vec3 bary) {
 //     return vec3(u, v, w);
 // }
 
-bool onSameTriangleSide(vec3 a, vec3 b, vec3 c, vec3 x, vec3 y) {
-    // For each plane of the tetrahedron, check if the point is on the same side as the remaining vertex
-    vec3 normal = cross(b - a, c - a);
-    float NdotX = dot(normal, x - a);
-    float NdotY = dot(normal, y - a);
 
-    return sign(NdotX) == sign(NdotY);
-}
+bool point_in_tet(vec3 p, vec3 a, vec3 b, vec3 c, vec3 d, out vec4 bary) {
+    bary = barycentric_3d(p, a, b, c, d);
 
-bool point_in_tet(vec3 p, vec3 a, vec3 b, vec3 c, vec3 d) {
-    return onSameTriangleSide(a, b, c, d, p) &&
-           onSameTriangleSide(b, c, d, a, p) &&
-           onSameTriangleSide(c, d, a, b, p) &&
-           onSameTriangleSide(d, a, b, c, p);
+    return all(greaterThanEqual(bary, vec4(0.0)));
 }
 
 void main() {
@@ -221,8 +212,8 @@ void main() {
         vec3 b = base_points[tet.y];
         vec3 c = base_points[tet.z];
         vec3 d = base_points[tet.w];
-        if (point_in_tet(p, a, b, c, d)) {
-            vec4 bary = barycentric_3d(p, a, b, c, d);
+        vec4 bary;
+        if (point_in_tet(p, a, b, c, d, bary)) {
             vec3 proj = bary.x * a + bary.y * b + bary.z * c + bary.w * d;
             out_indexes[buffer_index] = tet;
             out_bary[buffer_index] = bary;

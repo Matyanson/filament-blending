@@ -5,7 +5,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from scipy.spatial import Delaunay, ConvexHull
 
-from main_dispatcher import run_shader
+from main_dispatcher import ShaderPipeline
 
 # --- INPUT ---
 
@@ -67,7 +67,6 @@ base_points = np.array(base_points)
 # --- MAIN ---
 
 # 1) CPU: calculate Delaunay
-base_point_indexes = range(len(base_points))
 S = np.asarray(base_points)
 delaunay = Delaunay(S)
 hull = ConvexHull(S)
@@ -82,13 +81,16 @@ tets = delaunay.simplices  # shape (n, 4), each tet is a list of 4 vertex indice
 hull_tris = hull.simplices  # shape (m, 3), each triangle is a list of 3 vertex indices
 
 # Run compute shader dispatcher
-result_indices, result_coords  = run_shader(
-    target_img_path='./input/target_3.png',
+pipeline = ShaderPipeline(
+    target_img_path='./input/target_850.png',
     base_points=base_points,
     tets=tets,
-    hull_tris=hull_tris,
-    shader_path='./main_shader.comp'
+    hull_tris=hull_tris
 )
+
+result_indices, result_coords = pipeline.run_mix_colors()
+
+pipeline.cleanup()
 
 # Collect unique vertex indices used
 unique_indices = set()
@@ -103,4 +105,4 @@ for row in result_indices.reshape(-1, 4):
 
 print("Unique filament indices used:", unique_indices)
 
-print(len(base_point_indexes), len(unique_indices))
+print(len(base_points), len(unique_indices))

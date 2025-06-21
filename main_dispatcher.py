@@ -71,59 +71,72 @@ def read_and_save_tex(tex, filename, w, h):
     Image.fromarray(arr, mode="RGBA").save(filename)
 
 
-def run_shader(target_img_path, base_points, tets, hull_tris, shader_path):
-    # Setup OpenGL context using GLFW
-    if not glfw.init():
-        raise RuntimeError("Failed to initialize GLFW")
 
-    glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-    glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 4)
-    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-    glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+class ShaderPipeline:
+    def __init__(self, target_img_path, base_points, tets, hull_tris):
+        if not glfw.init():
+            raise RuntimeError("Failed to initialize GLFW")
 
-    window = glfw.create_window(1, 1, "", None, None)
-    if not window:
+        glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 4)
+        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+
+        self.window = glfw.create_window(1, 1, "", None, None)
+        if not self.window:
+            glfw.terminate()
+            raise RuntimeError("Failed to create GLFW window")
+
+        glfw.make_context_current(self.window)
+
+        # Image input and output
+        self.width, self.height, _ = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
+        _, _, self.output_tex = bind_image_texture(target_img_path, 1, GL_WRITE_ONLY)
+
+        self.num_pixels = self.width * self.height
+
+        # Input SSBOs (persist across shaders)
+        create_ssbo(np.array(base_points, dtype=np.float32), 2, np.float32)
+        create_ssbo(np.array(tets, dtype=np.int32), 3, dtype=np.int32)
+        create_ssbo(np.array(hull_tris, dtype=np.int32), 4, dtype=np.int32)
+
+        # Output buffers shared by both shaders
+        self.output_indices = create_ssbo(np.zeros((self.num_pixels, 4), dtype=np.int32), 5, np.int32)
+        self.output_coords = create_ssbo(np.zeros((self.num_pixels, 4), dtype=np.float32), 6, np.float32)
+
+        # Will be set later
+        self.filament_buf = None
+
+    def dispatch_shader(self, shader_path):
+        shader = load_compute_shader(shader_path)
+        glUseProgram(shader)
+        glDispatchCompute((self.width + 15) // 16, (self.height + 15) // 16, 1)
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+
+    def run_mix_colors(self):
+        self.dispatch_shader('./mix_colors.comp')
+
+        # Read back results
+        indices = copy_shader_buffer(self.output_indices, np.int32, self.num_pixels * 4)
+        coords = copy_shader_buffer(self.output_coords, np.float32, self.num_pixels * 4)
+
+        indices = indices.reshape((self.height, self.width, 4))
+        coords = coords.reshape((self.height, self.width, 4))
+
+        read_and_save_tex(self.output_tex, "output/mixed.png", self.width, self.height)
+        return indices, coords
+
+    def run_blend_colors(self, filament_order):
+        # Upload filament_order buffer (once or on each call)
+        if self.filament_buf is None:
+            self.filament_buf = create_ssbo(np.array(filament_order, dtype=np.int32), 7, dtype=np.int32)
+        else:
+            # Update buffer if needed
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, self.filament_buf)
+            glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, filament_order.nbytes, filament_order)
+
+        self.dispatch_shader('./blend_colors.comp')
+        read_and_save_tex(self.output_tex, "output/blended.png", self.width, self.height)
+
+    def cleanup(self):
         glfw.terminate()
-        raise RuntimeError("Failed to create GLFW window")
-
-    glfw.make_context_current(window)
-
-    shader = load_compute_shader(shader_path)
-
-    width, height, target_tex = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
-
-    # Prepare input buffers
-    create_ssbo(np.array(base_points, dtype=np.float32), 2, np.float32)
-    create_ssbo(np.array(tets, dtype=np.int32), 3, dtype=np.int32)
-    create_ssbo(np.array(hull_tris, dtype=np.int32), 4, dtype=np.int32)
-
-    # Prepare output buffers
-    _, _, output_tex = bind_image_texture(target_img_path, 1, GL_WRITE_ONLY)
-
-    num_pixels = width * height
-    data_template = np.zeros((num_pixels, 4), dtype=np.int32)
-    output_indices = create_ssbo(data_template, 5, dtype=np.int32)
-
-    data_template = np.zeros((num_pixels, 4), dtype=np.float32)
-    output_coords = create_ssbo(data_template, 6, dtype=np.float32)
-
-
-    # Dispatch shader
-    glUseProgram(shader)
-    glDispatchCompute((width + 15) // 16, (height + 15) // 16, 1)
-    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
-
-    # Read back indices
-    result_indices = copy_shader_buffer(output_indices, np.int32, num_pixels * 4)
-    result_indices = result_indices.reshape((height, width, 4))
-
-    # Read back barycentric coordinates
-    result_coords = copy_shader_buffer(output_coords, np.float32, num_pixels * 4)
-    result_coords = result_coords.reshape((height, width, 4))
-
-    # save texture
-    read_and_save_tex(output_tex, "output/mixed.png", width, height)
-
-
-    glfw.terminate()
-    return result_indices, result_coords

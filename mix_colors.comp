@@ -242,15 +242,15 @@ void main() {
             }
         }
 
-        // if(best_bary.x == 0.0) {
-        //     best_tri.x = -1;
-        // }
-        // if(best_bary.y == 0.0) {
-        //     best_tri.y = -1;
-        // }
-        // if(best_bary.z == 0.0) {
-        //     best_tri.z = -1;
-        // }
+        if(best_bary.x == 0.0) {
+            best_tri.x = -1;
+        }
+        if(best_bary.y == 0.0) {
+            best_tri.y = -1;
+        }
+        if(best_bary.z == 0.0) {
+            best_tri.z = -1;
+        }
 
         out_indexes[buffer_index] = ivec4(best_tri, -1);
         out_bary[buffer_index] = vec4(best_bary, 0.0);

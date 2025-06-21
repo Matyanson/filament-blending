@@ -4,25 +4,25 @@ layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(rgba8, binding = 0) uniform image2D target_image;
 
-layout(rgba8, binding=6) writeonly uniform image2D  output_image;
+layout(rgba8, binding = 1) writeonly uniform image2D  output_image;
 
-layout(std430, binding = 1) buffer BasePoints {
+layout(std430, binding = 2) buffer BasePoints {
     vec3 base_points[];
 };
 
-layout(std430, binding = 2) buffer Tetrahedrons {
+layout(std430, binding = 3) buffer Tetrahedrons {
     ivec4 tets[];
 };
 
-layout(std430, binding = 3) buffer HullTriangles {
+layout(std430, binding = 4) buffer HullTriangles {
     ivec3 hull_tris[];
 };
 
-layout(std430, binding = 4) buffer OutputIndicies {
+layout(std430, binding = 5) buffer OutputIndicies {
     ivec4 out_indexes[];
 };
 
-layout(std430, binding = 5) buffer OutputCoords {
+layout(std430, binding = 6) buffer OutputCoords {
     vec4 out_bary[];
 };
 

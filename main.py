@@ -44,6 +44,7 @@ def alpha_from_td(thickness, td):
 target_image = Image.open('./input/target_200.png').convert('RGB')
 filament_colors = []
 base_points = []
+base_points_alpha = []
 
 for f_name, f in filaments.items():
     rgb = np.array(f['rgb'])
@@ -55,8 +56,10 @@ for f_name, f in filaments.items():
         "alpha": alpha
     })
     base_points.append(rgb)
+    base_points_alpha.append(alpha)
 filament_colors = np.array(filament_colors)
 base_points = np.array(base_points)
+base_points_alpha = np.array(base_points_alpha)
 
 
 # --- FUNCTIONS ---
@@ -80,7 +83,7 @@ hull = ConvexHull(S)
 tets = delaunay.simplices  # shape (n, 4), each tet is a list of 4 vertex indices
 hull_tris = hull.simplices  # shape (m, 3), each triangle is a list of 3 vertex indices
 
-# Run compute shader dispatcher
+# Setup shader pipeline
 pipeline = ShaderPipeline(
     target_img_path='./input/target_850.png',
     base_points=base_points,
@@ -88,16 +91,27 @@ pipeline = ShaderPipeline(
     hull_tris=hull_tris
 )
 
+# Mix colors
 result_indices, result_coords = pipeline.run_mix_colors()
 
-pipeline.cleanup()
 
-# Collect unique vertex indices used
+
+# 3) Collect unique vertex indices used
 unique_indices = set()
 for row in result_indices.reshape(-1, 4):
     for idx in row:
         if idx >= 0:  # Skip unused (-1) entries
             unique_indices.add(idx)
+
+# 4) calculate filament order
+unique_indices = list(unique_indices)
+filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'])
+
+print(filament_colors, filament_order)
+
+pipeline.run_blend_colors(base_points_alpha, filament_order)
+
+pipeline.cleanup()
 
 
 # print(result_indices)

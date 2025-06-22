@@ -22,8 +22,7 @@ def bind_image_texture(path, binding_index, access=GL_READ_ONLY):
 
     return width, height, tex
 
-
-def create_ssbo(data, binding_index, dtype=np.float32):
+def base_align_data(data, dtype):
     arr = data.astype(dtype)
     # If a 2D array (array of vectors), ensure last axis is padded to multiple of 4
     if arr.ndim == 2:
@@ -35,12 +34,28 @@ def create_ssbo(data, binding_index, dtype=np.float32):
             pad_width = ((0, 0), (0, pad_cols - cols))
             arr = np.pad(arr, pad_width, mode='constant', constant_values=0)
     # else leave 1D or higher dims unchanged
+    return arr
 
-    buf = glGenBuffers(1)
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf)
+def create_ssbo(binding_index, data, dtype=np.float32):
+    arr = base_align_data(data, dtype)
+
+    buf_id = glGenBuffers(1)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_id)
     glBufferData(GL_SHADER_STORAGE_BUFFER, arr.nbytes, arr, GL_STATIC_DRAW)
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding_index, buf)
-    return buf
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, binding_index, buf_id)
+    return buf_id
+
+def update_ssbo(buf_id, data, dtype):
+    arr = base_align_data(data, dtype)
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_id)
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, arr.nbytes, arr)
+
+def create_update_ssbo(buf_id, binding_index, data, dtype=np.float32):
+    if(buf_id is None):
+        return create_ssbo(binding_index, data, dtype)
+    else:
+        update_ssbo(buf_id, data, dtype)
+    return buf_id
 
 
 def load_compute_shader(path):
@@ -95,14 +110,16 @@ class ShaderPipeline:
         self.num_pixels = self.width * self.height
 
         # Input SSBOs (persist across shaders)
-        create_ssbo(np.array(base_points, dtype=np.float32), 1, np.float32)
-        create_ssbo(np.array(base_points_alpha, dtype=np.float32), 2, np.float32)
+        create_ssbo(1, np.array(base_points, dtype=np.float32), np.float32)
+        create_ssbo(2, np.array(base_points_alpha, dtype=np.float32), np.float32)
 
         # Output buffers shared by both shaders
-        self.output_indices = create_ssbo(np.zeros((self.num_pixels, 4), dtype=np.int32), 5, np.int32)
-        self.output_coords = create_ssbo(np.zeros((self.num_pixels, 4), dtype=np.float32), 6, np.float32)
+        self.output_indices = create_ssbo(5, np.zeros((self.num_pixels, 4), dtype=np.int32), np.int32)
+        self.output_coords = create_ssbo(6, np.zeros((self.num_pixels, 4), dtype=np.float32), np.float32)
 
         # Will be set later
+        self.tets_buf = None # 3
+        self.hull_buf = None # 4
         self.filament_order_buf = None  # 7
         self.out_layers_buf = None      # 8
 
@@ -115,8 +132,8 @@ class ShaderPipeline:
     def run_mix_colors(self, tets, hull_tris):
 
         # Input buffers
-        create_ssbo(np.array(tets, dtype=np.int32), 3, np.int32)
-        create_ssbo(np.array(hull_tris, dtype=np.int32), 4, np.int32)
+        self.tets_buf = create_update_ssbo(self.tets_buf, 3, np.array(tets, dtype=np.int32), np.int32)
+        self.hull_buf = create_update_ssbo(self.hull_buf, 4, np.array(hull_tris, dtype=np.int32), np.int32)
 
         self.dispatch_shader('./mix_colors.comp')
 
@@ -133,11 +150,11 @@ class ShaderPipeline:
     def run_blend_colors(self, filament_order):
 
         # Input buffers
-        self.filament_order_buf = create_ssbo(np.array(filament_order, dtype=np.int32), 7, dtype=np.int32)
+        self.filament_order_buf = create_update_ssbo(self.filament_order_buf, 7, np.array(filament_order, dtype=np.int32), np.int32)
 
         # Output buffers
         n = len(filament_order)
-        self.out_layers_buf = create_ssbo(np.zeros((self.num_pixels, n), dtype=np.int32), 8, dtype=np.int32)
+        self.out_layers_buf = create_update_ssbo(self.out_layers_buf, 8, np.zeros((self.num_pixels, n), dtype=np.int32), np.int32)
 
         self.dispatch_shader('./blend_colors.comp')
         read_and_save_tex(self.target_tex, "output/blended.png", self.width, self.height)

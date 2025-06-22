@@ -73,7 +73,7 @@ def read_and_save_tex(tex, filename, w, h):
 
 
 class ShaderPipeline:
-    def __init__(self, target_img_path, base_points, tets, hull_tris):
+    def __init__(self, target_img_path, base_points, base_points_alpha, tets, hull_tris):
         if not glfw.init():
             raise RuntimeError("Failed to initialize GLFW")
 
@@ -90,24 +90,23 @@ class ShaderPipeline:
         glfw.make_context_current(self.window)
 
         # Image input and output
-        self.width, self.height, self.input_tex = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
-        _, _, self.output_tex = bind_image_texture(target_img_path, 1, GL_WRITE_ONLY)
+        self.width, self.height, self.target_tex = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
 
         self.num_pixels = self.width * self.height
 
         # Input SSBOs (persist across shaders)
-        create_ssbo(np.array(base_points, dtype=np.float32), 2, np.float32)
-        create_ssbo(np.array(tets, dtype=np.int32), 3, dtype=np.int32)
-        create_ssbo(np.array(hull_tris, dtype=np.int32), 4, dtype=np.int32)
+        create_ssbo(np.array(base_points, dtype=np.float32), 1, np.float32)
+        create_ssbo(np.array(base_points_alpha, dtype=np.float32), 2, np.float32)
+        create_ssbo(np.array(tets, dtype=np.int32), 3, np.int32)
+        create_ssbo(np.array(hull_tris, dtype=np.int32), 4, np.int32)
 
         # Output buffers shared by both shaders
         self.output_indices = create_ssbo(np.zeros((self.num_pixels, 4), dtype=np.int32), 5, np.int32)
         self.output_coords = create_ssbo(np.zeros((self.num_pixels, 4), dtype=np.float32), 6, np.float32)
 
         # Will be set later
-        self.base_points_alpha_buf = None
-        self.filament_order_buf = None
-        self.out_layers_buf = None
+        self.filament_order_buf = None  # 7
+        self.out_layers_buf = None      # 8
 
     def dispatch_shader(self, shader_path):
         shader = load_compute_shader(shader_path)
@@ -125,21 +124,20 @@ class ShaderPipeline:
         indices = indices.reshape((self.height, self.width, 4))
         coords = coords.reshape((self.height, self.width, 4))
 
-        read_and_save_tex(self.output_tex, "output/mixed.png", self.width, self.height)
+        read_and_save_tex(self.target_tex, "output/mixed.png", self.width, self.height)
         return indices, coords
 
-    def run_blend_colors(self, base_points_alpha, filament_order):
+    def run_blend_colors(self, filament_order):
 
         # Input buffers
-        self.base_points_alpha_buf = create_ssbo(np.array(base_points_alpha, dtype=np.float32), 7, dtype=np.float32)
-        self.filament_order_buf = create_ssbo(np.array(filament_order, dtype=np.int32), 8, dtype=np.int32)
+        self.filament_order_buf = create_ssbo(np.array(filament_order, dtype=np.int32), 7, dtype=np.int32)
 
         # Output buffers
         n = len(filament_order)
-        self.out_layers_buf = create_ssbo(np.zeros((self.num_pixels, n), dtype=np.int32), 9, dtype=np.int32)
+        self.out_layers_buf = create_ssbo(np.zeros((self.num_pixels, n), dtype=np.int32), 8, dtype=np.int32)
 
         self.dispatch_shader('./blend_colors.comp')
-        read_and_save_tex(self.output_tex, "output/blended.png", self.width, self.height)
+        read_and_save_tex(self.target_tex, "output/blended.png", self.width, self.height)
 
     def cleanup(self):
         glfw.terminate()

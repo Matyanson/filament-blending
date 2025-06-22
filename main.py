@@ -87,6 +87,7 @@ hull_tris = hull.simplices  # shape (m, 3), each triangle is a list of 3 vertex 
 pipeline = ShaderPipeline(
     target_img_path='./input/target_850.png',
     base_points=base_points,
+    base_points_alpha=base_points_alpha,
     tets=tets,
     hull_tris=hull_tris
 )
@@ -109,7 +110,7 @@ filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]
 
 print(filament_colors, filament_order)
 
-pipeline.run_blend_colors(base_points_alpha, filament_order)
+pipeline.run_blend_colors(filament_order)
 
 pipeline.cleanup()
 

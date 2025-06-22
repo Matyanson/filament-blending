@@ -4,9 +4,7 @@ layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(rgba8, binding = 0) uniform image2D target_image;
 
-layout(rgba8, binding = 1) writeonly uniform image2D  output_image;
-
-layout(std430, binding = 2) buffer BasePoints {
+layout(std430, binding = 1) buffer BasePoints {
     vec3 base_points[];
 };
 
@@ -209,7 +207,7 @@ void main() {
             vec3 proj = bary.x * a + bary.y * b + bary.z * c + bary.w * d;
             out_indexes[buffer_index] = tet;
             out_bary[buffer_index] = bary;
-            imageStore(output_image, pos, vec4(proj, 1.0));
+            imageStore(target_image, pos, vec4(proj, 1.0));
             found = 1;
             break;
         }
@@ -228,14 +226,14 @@ void main() {
             vec3 c = base_points[tri.z];
 
             
-            // vec3 bary = barycentric2DLab(p, a, b, c);
-            // vec3 proj = bary.x * a + bary.y * b + bary.z * c;
-            // float dist = colorDistance(p, proj);
-
-            vec3 bary = barycentric_2d(p, a, b, c);
-            bary = clampBary(bary);
+            vec3 bary = barycentric2DLab(p, a, b, c);
             vec3 proj = bary.x * a + bary.y * b + bary.z * c;
-            float dist = length(p - proj);
+            float dist = colorDistance(p, proj);
+
+            // vec3 bary = barycentric_2d(p, a, b, c);
+            // bary = clampBary(bary);
+            // vec3 proj = bary.x * a + bary.y * b + bary.z * c;
+            // float dist = length(p - proj);
             
             if (dist < min_dist) {
                 min_dist = dist;
@@ -257,6 +255,6 @@ void main() {
 
         out_indexes[buffer_index] = ivec4(best_tri, -1);
         out_bary[buffer_index] = vec4(best_bary, 0.0);
-        imageStore(output_image, pos, vec4(best_color, 1.0));
+        imageStore(target_image, pos, vec4(best_color, 1.0));
     }
 }

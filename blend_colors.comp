@@ -4,24 +4,13 @@ layout(local_size_x = 16, local_size_y = 16) in;
 
 layout(rgba8, binding = 0) uniform image2D target_image;
 
-layout(rgba8, binding = 1) writeonly uniform image2D  output_image;
-
-layout(std430, binding = 2) buffer BasePoints {
+layout(std430, binding = 1) buffer BasePoints {
     vec3 base_points[];
 };
 
-layout(std430, binding = 7) buffer BasePointsAlpha {
+layout(std430, binding = 2) buffer BasePointsAlpha {
     float base_points_alpha[];
 };
-
-layout(std430, binding = 8) buffer FilamentOrder {
-    int filament_order[];
-};
-
-layout(std430, binding = 9) buffer OutputLayers {
-    int out_layers[];
-};
-
 
 layout(std430, binding = 5) buffer OutputIndicies {
     ivec4 out_indexes[];    // what base_points we are mixing
@@ -29,6 +18,14 @@ layout(std430, binding = 5) buffer OutputIndicies {
 
 layout(std430, binding = 6) buffer OutputCoords {
     vec4 out_bary[];    // ratio of the base_points we are mixing with
+};
+
+layout(std430, binding = 7) buffer FilamentOrder {
+    int filament_order[];
+};
+
+layout(std430, binding = 8) buffer OutputLayers {
+    int out_layers[];
 };
 
 
@@ -43,7 +40,7 @@ float alpha_to_layer_count(float target_alpha, float single_layer_alpha) {
 
 void main() {
     ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 img_size = imageSize(output_image);
+    ivec2 img_size = imageSize(target_image);
     if (pos.x >= img_size.x || pos.y >= img_size.y) return;
 
     int pixel_index = pos.y * img_size.x + pos.x;
@@ -102,5 +99,5 @@ void main() {
     // normalize the final color rgb values
     final_color.rgb = final_color.rgb / final_color.a;
 
-    imageStore(output_image, pos, vec4(final_color.rgb, 1.0));
+    imageStore(target_image, pos, vec4(final_color.rgb, 1.0));
 }

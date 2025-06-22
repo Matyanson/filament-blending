@@ -227,12 +227,15 @@ void main() {
             vec3 b = base_points[tri.y];
             vec3 c = base_points[tri.z];
 
-            // vec3 bary = barycentric_2d(p, a, b, c);
-            vec3 bary = barycentric2DLab(p, a, b, c);
+            
+            // vec3 bary = barycentric2DLab(p, a, b, c);
+            // vec3 proj = bary.x * a + bary.y * b + bary.z * c;
+            // float dist = colorDistance(p, proj);
+
+            vec3 bary = barycentric_2d(p, a, b, c);
             bary = clampBary(bary);
             vec3 proj = bary.x * a + bary.y * b + bary.z * c;
-            // float dist = length(p - proj);
-            float dist = colorDistance(p, proj);
+            float dist = length(p - proj);
             
             if (dist < min_dist) {
                 min_dist = dist;

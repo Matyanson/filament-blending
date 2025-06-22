@@ -1,0 +1,106 @@
+#version 430
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(rgba8, binding = 0) uniform image2D target_image;
+
+layout(rgba8, binding = 1) writeonly uniform image2D  output_image;
+
+layout(std430, binding = 2) buffer BasePoints {
+    vec3 base_points[];
+};
+
+layout(std430, binding = 7) buffer BasePointsAlpha {
+    float base_points_alpha[];
+};
+
+layout(std430, binding = 8) buffer FilamentOrder {
+    int filament_order[];
+};
+
+layout(std430, binding = 9) buffer OutputLayers {
+    int out_layers[];
+};
+
+
+layout(std430, binding = 5) buffer OutputIndicies {
+    ivec4 out_indexes[];    // what base_points we are mixing
+};
+
+layout(std430, binding = 6) buffer OutputCoords {
+    vec4 out_bary[];    // ratio of the base_points we are mixing with
+};
+
+
+float layer_count_to_alpha(float single_layer_alpha, int count) {
+    return 1.0 - pow((1.0 - single_layer_alpha), count);
+}
+
+float alpha_to_layer_count(float target_alpha, float single_layer_alpha) {
+    return log(1.0 - target_alpha) / log(1.0 - single_layer_alpha);
+}
+
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 img_size = imageSize(output_image);
+    if (pos.x >= img_size.x || pos.y >= img_size.y) return;
+
+    int pixel_index = pos.y * img_size.x + pos.x;
+    int filament_layer_count = filament_order.length();
+    ivec4 idxs = out_indexes[pixel_index];
+    vec4 bary = out_bary[pixel_index];
+
+    float max_alpha = 0.99;
+    float alpha_remaining = 1.0;
+    vec4 final_color = vec4(vec3(0.0), 0.0);
+
+    for(int i = 0; i < filament_layer_count; i++) {
+        int base_point_index = filament_order[i];
+
+        // find if we use this base_point in the mix & retrieve its weight in the mix
+        float weight = 0.0;
+        if(idxs.x == base_point_index) {
+            weight = bary.x;
+        }
+        else if (idxs.y == base_point_index) {
+            weight = bary.y;
+        }
+        else if (idxs.z == base_point_index) {
+            weight = bary.z;
+        }
+        else if (idxs.w == base_point_index) {
+            weight = bary.w;
+        }
+        else {
+            continue;
+        }
+
+        // find the data for base_point_index in base_points & base_points_alpha
+        vec3 p = base_points[base_point_index];
+        float alpha = base_points_alpha[base_point_index];
+
+        // calculate layer count
+        float target_alpha = min(weight / alpha_remaining, max_alpha);
+
+        float layer_count_f = alpha_to_layer_count(target_alpha, alpha);
+        int layer_count_round = int(round(layer_count_f));
+        float layers_alpha_relative = layer_count_to_alpha(alpha, layer_count_round);
+        float layers_alpha_absolute = layers_alpha_relative * alpha_remaining;
+
+        // calculate color blend
+        final_color.rgb += layers_alpha_absolute * p.rgb;
+        final_color.a += layers_alpha_absolute;
+
+        // save to output buffer
+        int layers_buf_index = pixel_index * filament_layer_count + i;
+        out_layers[layers_buf_index] = layer_count_round;
+
+        alpha_remaining -= layers_alpha_absolute;
+    }
+
+    // normalize the final color rgb values
+    final_color.rgb = final_color.rgb / final_color.a;
+
+    imageStore(output_image, pos, vec4(final_color.rgb, 1.0));
+}

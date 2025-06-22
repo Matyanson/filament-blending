@@ -90,7 +90,7 @@ class ShaderPipeline:
         glfw.make_context_current(self.window)
 
         # Image input and output
-        self.width, self.height, _ = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
+        self.width, self.height, self.input_tex = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
         _, _, self.output_tex = bind_image_texture(target_img_path, 1, GL_WRITE_ONLY)
 
         self.num_pixels = self.width * self.height
@@ -105,7 +105,9 @@ class ShaderPipeline:
         self.output_coords = create_ssbo(np.zeros((self.num_pixels, 4), dtype=np.float32), 6, np.float32)
 
         # Will be set later
-        self.filament_buf = None
+        self.base_points_alpha_buf = None
+        self.filament_order_buf = None
+        self.out_layers_buf = None
 
     def dispatch_shader(self, shader_path):
         shader = load_compute_shader(shader_path)
@@ -126,14 +128,15 @@ class ShaderPipeline:
         read_and_save_tex(self.output_tex, "output/mixed.png", self.width, self.height)
         return indices, coords
 
-    def run_blend_colors(self, filament_order):
-        # Upload filament_order buffer (once or on each call)
-        if self.filament_buf is None:
-            self.filament_buf = create_ssbo(np.array(filament_order, dtype=np.int32), 7, dtype=np.int32)
-        else:
-            # Update buffer if needed
-            glBindBuffer(GL_SHADER_STORAGE_BUFFER, self.filament_buf)
-            glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, filament_order.nbytes, filament_order)
+    def run_blend_colors(self, base_points_alpha, filament_order):
+
+        # Input buffers
+        self.base_points_alpha_buf = create_ssbo(np.array(base_points_alpha, dtype=np.float32), 7, dtype=np.float32)
+        self.filament_order_buf = create_ssbo(np.array(filament_order, dtype=np.int32), 8, dtype=np.int32)
+
+        # Output buffers
+        n = len(filament_order)
+        self.out_layers_buf = create_ssbo(np.zeros((self.num_pixels, n), dtype=np.int32), 9, dtype=np.int32)
 
         self.dispatch_shader('./blend_colors.comp')
         read_and_save_tex(self.output_tex, "output/blended.png", self.width, self.height)

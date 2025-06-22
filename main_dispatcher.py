@@ -73,7 +73,7 @@ def read_and_save_tex(tex, filename, w, h):
 
 
 class ShaderPipeline:
-    def __init__(self, target_img_path, base_points, base_points_alpha, tets, hull_tris):
+    def __init__(self, target_img_path, base_points, base_points_alpha):
         if not glfw.init():
             raise RuntimeError("Failed to initialize GLFW")
 
@@ -97,8 +97,6 @@ class ShaderPipeline:
         # Input SSBOs (persist across shaders)
         create_ssbo(np.array(base_points, dtype=np.float32), 1, np.float32)
         create_ssbo(np.array(base_points_alpha, dtype=np.float32), 2, np.float32)
-        create_ssbo(np.array(tets, dtype=np.int32), 3, np.int32)
-        create_ssbo(np.array(hull_tris, dtype=np.int32), 4, np.int32)
 
         # Output buffers shared by both shaders
         self.output_indices = create_ssbo(np.zeros((self.num_pixels, 4), dtype=np.int32), 5, np.int32)
@@ -114,7 +112,12 @@ class ShaderPipeline:
         glDispatchCompute((self.width + 15) // 16, (self.height + 15) // 16, 1)
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
 
-    def run_mix_colors(self):
+    def run_mix_colors(self, tets, hull_tris):
+
+        # Input buffers
+        create_ssbo(np.array(tets, dtype=np.int32), 3, np.int32)
+        create_ssbo(np.array(hull_tris, dtype=np.int32), 4, np.int32)
+
         self.dispatch_shader('./mix_colors.comp')
 
         # Read back results

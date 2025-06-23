@@ -12,20 +12,20 @@ layout(std430, binding = 2) buffer BasePointsAlpha {
     float base_points_alpha[];
 };
 
+layout(std430, binding = 3) buffer FilamentOrder {
+    int filament_order[];
+};
+
+layout(std430, binding = 4) buffer OutputLayers {
+    int out_layers[];
+};
+
 layout(std430, binding = 5) buffer OutputIndicies {
     ivec4 out_indexes[];    // what base_points we are mixing
 };
 
 layout(std430, binding = 6) buffer OutputCoords {
     vec4 out_bary[];    // ratio of the base_points we are mixing with
-};
-
-layout(std430, binding = 7) buffer FilamentOrder {
-    int filament_order[];
-};
-
-layout(std430, binding = 8) buffer OutputLayers {
-    int out_layers[];
 };
 
 

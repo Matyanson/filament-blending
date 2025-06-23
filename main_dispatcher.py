@@ -96,12 +96,9 @@ def load_compute_shader(path):
     return compileProgram(compileShader(source, GL_COMPUTE_SHADER))
 
 def copy_shader_buffer(buffer_id, dtype, count):
-    if dtype == np.int32:
-        ctype_arr = ctypes.c_int32 * count
-    elif dtype == np.float32:
-        ctype_arr = ctypes.c_float * count
-    else:
-        raise ValueError(f"Unsupported dtype: {dtype}")
+    if dtype == np.int32:       ctype_arr = ctypes.c_int32 * count
+    elif dtype == np.float32:   ctype_arr = ctypes.c_float * count
+    else:                       raise ValueError(f"Unsupported dtype: {dtype}")
     
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffer_id)
     ptr = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY)
@@ -162,6 +159,12 @@ class ShaderPipeline:
         glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
 
     def run_mix_colors(self, tets, hull_tris):
+        # 0: target_tex
+        # 1: base_points
+        # 3: tets
+        # 4: hull_tris
+        # 5: out_indexes    - base point indexes
+        # 6: out_bary       - barycentric coords
 
         # Input buffers
         self.tets_buf = create_update_ssbo(self.tets_buf, 3, np.array(tets, dtype=np.int32), np.int32)
@@ -180,13 +183,20 @@ class ShaderPipeline:
         return indices, coords
 
     def run_blend_colors(self, filament_order):
+        # 0: target_image
+        # 1: base_points
+        # 2: base_points_alpha
+        # 3: filament_order
+        # 4: out_layers         - thickness of each filament layer
+        # 5: out_indexes
+        # 6: out_bary
 
         # Input buffers
-        self.filament_order_buf = create_update_ssbo(self.filament_order_buf, 7, np.array(filament_order, dtype=np.int32), np.int32)
+        self.filament_order_buf = create_update_ssbo(self.filament_order_buf, 3, np.array(filament_order, dtype=np.int32), np.int32)
 
         # Output buffers
         n = len(filament_order)
-        self.out_layers_buf = create_update_ssbo(self.out_layers_buf, 8, np.zeros((self.num_pixels, n), dtype=np.int32), np.int32)
+        self.out_layers_buf = create_update_ssbo(self.out_layers_buf, 4, np.zeros((self.num_pixels, n), dtype=np.int32), np.int32)
 
         self.dispatch_shader('./blend_colors.comp')
         read_and_save_tex(self.target_tex, "output/blended.png", self.width, self.height)

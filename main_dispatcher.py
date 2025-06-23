@@ -5,6 +5,25 @@ from PIL import Image
 import ctypes
 import glfw
 
+def get_glsl_format(dtype):
+    # Mapping from numpy dtype to (internal_format, format, type)
+    format_map = {
+        np.uint8:  (GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE),
+        np.uint16: (GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT),
+        np.uint32: (GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT),
+        np.int8:   (GL_R8I, GL_RED_INTEGER, GL_BYTE),
+        np.int16:  (GL_R16I, GL_RED_INTEGER, GL_SHORT),
+        np.int32:  (GL_R32I, GL_RED_INTEGER, GL_INT),
+        np.float32:(GL_R32F, GL_RED, GL_FLOAT),  # For floating-point textures
+    }
+    # Normalize: make sure we’ve got a numpy.dtype
+    dt = np.dtype(dtype)
+    scalar_type = dt.type
+
+    if scalar_type not in format_map:
+        raise ValueError(f"Unsupported dtype: {scalar_type}")
+    
+    return format_map[scalar_type]
 
 def bind_image_texture(path, binding_index, access=GL_READ_ONLY):    
     img = Image.open(path).convert('RGBA')
@@ -21,6 +40,19 @@ def bind_image_texture(path, binding_index, access=GL_READ_ONLY):
     glBindImageTexture(binding_index, tex, 0, GL_FALSE, 0, access, GL_RGBA8)
 
     return width, height, tex
+
+def bind_3d_texture(binding_index, data, access=GL_READ_ONLY):
+    
+    dtype = data.dtype
+    internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
+
+    height, width, depth = data.shape
+    tex = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_3D, tex)
+    glTexImage3D(GL_TEXTURE_3D, 0, internal_format,
+                 width, height, depth, 0,
+                 pixel_format, pixel_type, data)
+    glBindImageTexture(binding_index, tex, 0, GL_TRUE, 0, access, internal_format)
 
 def base_align_data(data, dtype):
     arr = data.astype(dtype)

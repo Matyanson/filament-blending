@@ -4,8 +4,11 @@ from skimage import color
 from PIL import Image
 import matplotlib.pyplot as plt
 from scipy.spatial import Delaunay, ConvexHull
+import glfw
 
+from glsl_helper import look_at, perspective
 from main_dispatcher import ShaderPipeline
+from renderer import VolumeRenderer
 
 # --- INPUT ---
 
@@ -69,6 +72,14 @@ base_points_alpha = np.array(base_points_alpha)
 
 # --- MAIN ---
 
+# setup glsl context
+win_w = 500
+win_h = 500
+glfw.init()
+window = glfw.create_window(win_w, win_h, "Voxel Renderer", None, None)
+glfw.make_context_current(window)
+
+
 # 1) CPU: calculate Delaunay
 S = np.asarray(base_points)
 delaunay = Delaunay(S)
@@ -90,6 +101,8 @@ pipeline = ShaderPipeline(
     base_points_alpha=base_points_alpha
 )
 
+width, height = pipeline.get_texture_dimensions()
+
 # Mix colors
 result_indices, result_coords = pipeline.run_mix_colors(tets, hull_tris)
 
@@ -106,16 +119,43 @@ for row in result_indices.reshape(-1, 4):
 unique_indices = list(unique_indices)
 filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'])
 
-print(filament_colors, filament_order)
-
 pipeline.run_blend_colors(filament_order)
 
+voxel_tex, volume_dimensions = pipeline.run_raymarching(filament_order)
+
+W, H, D = volume_dimensions  # (512, 512, 29)
+center = np.array([-W/8, H/2, D/2], dtype=np.float32)  # (256,256,14.5)
+eye    = np.array([center[0], center[1], -100.0], dtype=np.float32)
+up     = np.array([0, 0, 1], dtype=np.float32)
+view_mat = look_at(eye, center, up)
+
+# projection
+fovy    = np.radians(45.0)
+aspect  = W / H
+znear   = 0.1
+zfar    = np.linalg.norm([W, H, D]) * 3.0
+
+proj_mat = perspective(fovy, aspect, znear, zfar)
+
+renderer = VolumeRenderer(
+    window,
+    win_w,
+    win_h,
+    'fullscreen.vert',
+    'raymarch.frag'
+)
+print("volume_dimensions: ", volume_dimensions)
+renderer.set_volume(voxel_tex, volume_dimensions)
+renderer.set_camera(view_mat, proj_mat)
+
+while not glfw.window_should_close(window):
+    renderer.render_frame(step_size=0.1)
+
+renderer.cleanup()
 pipeline.cleanup()
 
 
-# print(result_indices)
-# print(result_coords)
-
+print("filament_order: ", filament_order)
 print("Unique filament indices used:", unique_indices)
 
 print(len(base_points), len(unique_indices))

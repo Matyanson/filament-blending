@@ -54,6 +54,36 @@ def bind_3d_texture(binding_index, data, access=GL_READ_ONLY):
                  pixel_format, pixel_type, data)
     glBindImageTexture(binding_index, tex, 0, GL_TRUE, 0, access, internal_format)
 
+    return tex
+
+def bind_3d_texture_as_sampler(data_slices):
+    dtype = data_slices.dtype
+    internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
+
+    d, h, w = data_slices.shape
+    data_flat = data_slices.flatten()
+    tex = glGenTextures(1)
+    tex = int(tex)
+    glBindTexture(GL_TEXTURE_3D, tex)
+
+    # No alignment padding
+    # glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+
+    # Allocate storage
+    glTexStorage3D(GL_TEXTURE_3D, 1, internal_format, w, h, d)
+    # Upload your uint8 ID data
+    glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, w, h, d,
+                    pixel_format, pixel_type, data_flat)
+
+    # Nearest‐neighbor, no interpolation
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE)
+
+    return tex
+
 def base_align_data(data, dtype):
     arr = data.astype(dtype)
     # If a 2D array (array of vectors), ensure last axis is padded to multiple of 4
@@ -118,20 +148,11 @@ def read_and_save_tex(tex, filename, w, h):
 
 class ShaderPipeline:
     def __init__(self, target_img_path, base_points, base_points_alpha):
-        if not glfw.init():
-            raise RuntimeError("Failed to initialize GLFW")
 
-        glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
+        # glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 4)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-
-        self.window = glfw.create_window(1, 1, "", None, None)
-        if not self.window:
-            glfw.terminate()
-            raise RuntimeError("Failed to create GLFW window")
-
-        glfw.make_context_current(self.window)
 
         # Image input and output
         self.width, self.height, self.target_tex = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
@@ -196,10 +217,51 @@ class ShaderPipeline:
 
         # Output buffers
         n = len(filament_order)
-        self.out_layers_buf = create_update_ssbo(self.out_layers_buf, 4, np.zeros((self.num_pixels, n), dtype=np.int32), np.int32)
+        self.out_layers_buf = create_update_ssbo(self.out_layers_buf, 4, np.zeros(self.num_pixels * n, dtype=np.int32), np.int32)
 
         self.dispatch_shader('./blend_colors.comp')
         read_and_save_tex(self.target_tex, "output/blended.png", self.width, self.height)
+
+    def run_raymarching(self, filament_order):
+        # 0: voxel_data         - 3d representation of the filament
+        # 1: base_points
+        # 2: base_points_alpha
+
+        # 1) Read back the SSBO into a (W*H*N,) array
+        n = len(filament_order)
+        flat = copy_shader_buffer(self.out_layers_buf, np.int32, self.num_pixels * n)
+        layers = flat.reshape((self.height, self.width, n))
+
+        # 2) Build the voxel grid: uint8 IDs in shape (W, H, D)
+        #    Depth is the max over all pixel-layer sums
+        depth = int(np.max(np.sum(layers, axis=2)))
+        self.volume_dimensions = (self.width, self.height, depth)
+        voxel_data = np.full((self.height, self.width, depth), 255, dtype=np.uint8)
+
+        for y in range(self.height):
+            for x in range(self.width):
+                z = 0
+                for i, thickness in enumerate(layers[y, x]):
+                    if thickness <= 0:
+                        continue
+                    
+                    fil_id = filament_order[i]
+                    # fill `thickness` voxels with `fil_id`
+                    end = min(depth, z + thickness)
+                    voxel_data[y, x, z:end] = fil_id
+                    z = end
+        
+        # Convert to (depth, height, width) using np.transpose
+        voxel_data = np.transpose(voxel_data, (2, 0, 1))
+
+        # 3) Upload as 3D texture bound at unit 9
+        self.voxel_tex = bind_3d_texture_as_sampler(voxel_data)
+
+        # 4) return the tex_id and dimensions
+        return self.voxel_tex, self.volume_dimensions
+
+    def get_texture_dimensions(self):
+        return self.width, self.height
 
     def cleanup(self):
         glfw.terminate()

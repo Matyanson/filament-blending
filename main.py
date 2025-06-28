@@ -115,17 +115,17 @@ for row in result_indices.reshape(-1, 4):
         if idx >= 0:  # Skip unused (-1) entries
             unique_indices.add(idx)
 
-# 4) calculate filament order
+# 4) calculate filament order (most opaque at the bottom=0)
 unique_indices = list(unique_indices)
-filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'])
+filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'], reverse=True)
 
 pipeline.run_blend_colors(filament_order)
 
 voxel_tex, volume_dimensions = pipeline.run_raymarching(filament_order)
 
 W, H, D = volume_dimensions  # (512, 512, 29)
-center = np.array([-W/8, H/2, D/2], dtype=np.float32)  # (256,256,14.5)
-eye    = np.array([center[0], center[1], -100.0], dtype=np.float32)
+center = np.array([W/2, H/2, D/2], dtype=np.float32)  # (256,256,14.5)
+eye    = np.array([center[0], center[1], 300.0], dtype=np.float32)
 up     = np.array([0, 0, 1], dtype=np.float32)
 view_mat = look_at(eye, center, up)
 
@@ -149,7 +149,7 @@ renderer.set_volume(voxel_tex, volume_dimensions)
 renderer.set_camera(view_mat, proj_mat)
 
 while not glfw.window_should_close(window):
-    renderer.render_frame(step_size=0.1)
+    renderer.render_frame(step_size=0.5)
 
 renderer.cleanup()
 pipeline.cleanup()

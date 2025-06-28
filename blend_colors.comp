@@ -52,7 +52,8 @@ void main() {
     float alpha_remaining = 1.0;
     vec4 final_color = vec4(vec3(0.0), 0.0);
 
-    for(int i = 0; i < filament_layer_count; i++) {
+    // itterate filaments from top to bottom
+    for(int i = filament_layer_count - 1; i >=0 ; i--) {
         int base_point_index = filament_order[i];
 
         // find if we use this base_point in the mix & retrieve its weight in the mix

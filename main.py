@@ -7,6 +7,7 @@ from scipy.spatial import Delaunay, ConvexHull
 import glfw
 
 from glsl_helper import look_at, perspective
+from helper import get_voxel_volume
 from main_dispatcher import ShaderPipeline
 from renderer import VolumeRenderer
 
@@ -63,12 +64,6 @@ filament_colors = np.array(filament_colors)
 base_points = np.array(base_points)
 base_points_alpha = np.array(base_points_alpha)
 
-
-# --- FUNCTIONS ---
-
-
-
-
 # --- MAIN ---
 
 # setup glsl context
@@ -119,9 +114,37 @@ for row in result_indices.reshape(-1, 4):
 unique_indices = list(unique_indices)
 filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'], reverse=True)
 
-pipeline.run_blend_colors(filament_order)
+# 5) Find the optimal filament thickness for color blending (layers)
+layers = pipeline.run_blend_colors(filament_order)
 
-voxel_tex, volume_dimensions = pipeline.run_raymarching(filament_order)
+# 6) modify layers to be compatible with 3d printing
+
+# 6.1: flatten 0th layer
+max0 = layers[:, :, 0].max()
+layers[:, :, 0] = max0
+print(f"Layer {0} values:\n{layers[:, :, 0]}\n")
+
+# 6.2: smoothen layers that are not 0 or n-1
+offset = layers[:, :, 0].copy()
+num_layers = layers.shape[2]
+
+for i in range(1, num_layers - 1):
+    layer = layers[:, :, i]
+    print(f"Layer {i} values:\n{layer}\n")
+    elevation = offset + layer
+    elevation_smooth = pipeline.run_smoothing(elevation)
+    elevation_smooth = np.astype(elevation_smooth, np.int32)
+    layer_smooth = elevation_smooth - offset
+    print("min: ", np.min(layer_smooth))
+    layers[:, :, i] = layer_smooth
+    print(f"Layer {i} SMOOTH values:\n{layer}\n{'-'*40}\n")
+    offset = elevation_smooth
+
+
+
+
+# FINAL: render the 3d volume!
+voxel_data, volume_dimensions = get_voxel_volume(filament_order, layers)
 
 W, H, D = volume_dimensions  # (512, 512, 29)
 camera_pos    = np.array([W/2, H/2, 300.0], dtype=np.float32)
@@ -131,10 +154,10 @@ renderer = VolumeRenderer(
     win_w,
     win_h,
     'shaders_render/fullscreen.vert',
-    'shaders_render/raymarch.frag'
+    'shaders_render/blend_voxels.frag'
 )
 print("volume_dimensions: ", volume_dimensions)
-renderer.set_volume(voxel_tex, volume_dimensions)
+renderer.set_volume(voxel_data)
 renderer.set_camera(camera_pos)
 
 while not glfw.window_should_close(window):

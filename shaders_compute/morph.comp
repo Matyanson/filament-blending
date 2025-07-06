@@ -1,0 +1,75 @@
+#version 450
+
+layout (local_size_x = 16, local_size_y = 16) in;
+
+//  Two image/buffer bindings: 
+//  binding=0: input/output envelope (ping-ponged each pass)
+//  binding=1: original image A (read-only)
+layout (binding = 0, r32f) uniform readonly  image2D  uA;
+layout (binding = 1, r32f) uniform readonly  image2D  uPrev;
+layout (binding = 2, r32f) uniform writeonly image2D  uNext;
+
+layout(std430, binding = 3) buffer ConvergedFlag {
+    uint changed_flag;      // 0 = so far no pixel has changed
+};
+
+uniform int uMode;          // 0=lower, 1=upper
+uniform int uDistMethod;    //  0=euclidian, 1=chebyshev, 2=manhattan
+uniform float uMaxGradient;
+
+float getDist(vec2 dir) {
+    if(uDistMethod == 0)
+        return length(dir);  // sqrt(dx*dx + dy*dy) EUCLIDIAN
+    else if (uDistMethod == 1)
+        return max(abs(dir.x), abs(dir.y));  // Chebyshev
+    else
+        return abs(dir.x) + abs(dir.y);     // Manhattan
+}
+
+float getBestVal(float currVal, float nextVal, float cost) {
+    if(uMode == 0) {
+        return min(currVal, nextVal + cost);
+    } else {
+        return max(currVal, nextVal - cost);
+    }
+}
+
+void main() {
+    ivec2 ij = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dims = imageSize(uA);
+    if (ij.x < 0 || ij.y < 0 || ij.x >= dims.x || ij.y >= dims.y) 
+        return;
+
+    float center = imageLoad(uPrev, ij).r;
+    float best   = imageLoad(uA,    ij).r;  // never go below A
+
+    const ivec2 dirs[8] = ivec2[8](
+        ivec2(-1, -1), ivec2(0, -1), ivec2(1, -1),
+        ivec2(-1,  0),               ivec2(1,  0),
+        ivec2(-1,  1), ivec2(0,  1), ivec2(1,  1)
+    );
+
+    // Examine the eight neighbours
+    for (int k = 0; k < 8; k++) {
+        ivec2 dir = dirs[k];
+        ivec2 ij2 = ij + dir;
+        // bounds check
+        if (ij2.x < 0 || ij2.y < 0 || ij2.x >= dims.x || ij2.y >= dims.y)
+            continue;
+        float val = imageLoad(uPrev, ij2).r;
+        float cost = uMaxGradient * getDist(vec2(dir));
+        best = getBestVal(best, val, cost);
+    }
+
+    // also compare to center (so it's non‐decreasing)
+    best = getBestVal(best, center, 0.0);
+
+    imageStore(uNext, ij, vec4(best));
+
+    // set the flag if change detected    
+    if (best != center) {
+        atomicOr(changed_flag, 1u);
+        // changed_flag = 1u;
+    }
+
+}

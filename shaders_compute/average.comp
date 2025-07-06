@@ -1,0 +1,25 @@
+#version 450
+
+layout (local_size_x = 16, local_size_y = 16) in;
+
+layout (binding = 0, r32f) uniform image2D  uInput1;
+layout (binding = 1, r32f) uniform image2D  uInput2;
+
+uniform int uMode;  // 0=average 1=...
+
+float transform(float val1, float val2) {
+    return mix(val1, val2, 0.5);
+}
+
+void main() {
+    ivec2 ij = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dims = imageSize(uInput1);
+    if (ij.x < 0 || ij.y < 0 || ij.x >= dims.x || ij.y >= dims.y) 
+        return;
+
+    float val1 = imageLoad(uInput1, ij).r;
+    float val2 = imageLoad(uInput2, ij).r;
+    val1 = transform(val1, val2);
+
+    imageStore(uInput1, ij, vec4(val1));
+}

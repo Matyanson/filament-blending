@@ -6,7 +6,7 @@ import ctypes
 import glfw
 
 def get_glsl_format(dtype):
-    # Mapping from numpy dtype to (internal_format, format, type)
+    # Mapping from numpy dtype to (internal_format, pixel_format, pixel_type)
     format_map = {
         np.uint8:  (GL_R8UI, GL_RED_INTEGER, GL_UNSIGNED_BYTE),
         np.uint16: (GL_R16UI, GL_RED_INTEGER, GL_UNSIGNED_SHORT),
@@ -25,7 +25,7 @@ def get_glsl_format(dtype):
     
     return format_map[scalar_type]
 
-def bind_image_texture(path, binding_index, access=GL_READ_ONLY):    
+def bind_image_texture_from_path(path, binding_index, access=GL_READ_ONLY):    
     img = Image.open(path).convert('RGBA')
     img_data = np.array(img).astype(np.uint8)
     height, width = img_data.shape[:2]
@@ -41,6 +41,19 @@ def bind_image_texture(path, binding_index, access=GL_READ_ONLY):
 
     return width, height, tex
 
+def save_texture(img_data, dtype):
+    internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
+
+    H, W = img_data.shape[:2]
+    tex = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_2D, tex)
+    glTexStorage2D(GL_TEXTURE_2D, 1, internal_format, W, H)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
+                    pixel_format, pixel_type, img_data)
+    return tex
+
 def bind_3d_texture(binding_index, data, access=GL_READ_ONLY):
     
     dtype = data.dtype
@@ -53,34 +66,6 @@ def bind_3d_texture(binding_index, data, access=GL_READ_ONLY):
                  width, height, depth, 0,
                  pixel_format, pixel_type, data)
     glBindImageTexture(binding_index, tex, 0, GL_TRUE, 0, access, internal_format)
-
-    return tex
-
-def bind_3d_texture_as_sampler(data_slices):
-    dtype = data_slices.dtype
-    internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
-
-    d, h, w = data_slices.shape
-    data_flat = data_slices.flatten()
-    tex = glGenTextures(1)
-    tex = int(tex)
-    glBindTexture(GL_TEXTURE_3D, tex)
-
-    # No alignment padding
-    # glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
-
-    # Allocate storage
-    glTexStorage3D(GL_TEXTURE_3D, 1, internal_format, w, h, d)
-    # Upload your uint8 ID data
-    glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, w, h, d,
-                    pixel_format, pixel_type, data_flat)
-
-    # Nearest‐neighbor, no interpolation
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE)
 
     return tex
 
@@ -121,12 +106,13 @@ def create_update_ssbo(buf_id, binding_index, data, dtype=np.float32):
 
 
 def load_compute_shader(path):
-    with open(path, 'r') as f:
+    with open(path, "r", encoding="utf-8") as f:
         source = f.read()
     return compileProgram(compileShader(source, GL_COMPUTE_SHADER))
 
 def copy_shader_buffer(buffer_id, dtype, count):
     if dtype == np.int32:       ctype_arr = ctypes.c_int32 * count
+    elif dtype == np.uint32:       ctype_arr = ctypes.c_uint32 * count
     elif dtype == np.float32:   ctype_arr = ctypes.c_float * count
     else:                       raise ValueError(f"Unsupported dtype: {dtype}")
     
@@ -144,6 +130,15 @@ def read_and_save_tex(tex, filename, w, h):
     arr = np.frombuffer(pixels, dtype=np.uint8).reshape((h, w, 4))
     Image.fromarray(arr, mode="RGBA").save(filename)
 
+def read_tex(tex_id, w, h, dtype):
+    internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
+
+    glBindTexture(GL_TEXTURE_2D, tex_id)
+    raw = glGetTexImage(GL_TEXTURE_2D, 0, pixel_format, pixel_type)
+    arr = np.frombuffer(raw, dtype).reshape(h, w)
+
+    return arr
+
 
 
 class ShaderPipeline:
@@ -155,7 +150,7 @@ class ShaderPipeline:
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 
         # Image input and output
-        self.width, self.height, self.target_tex = bind_image_texture(target_img_path, 0, GL_READ_WRITE)
+        self.width, self.height, self.target_tex = bind_image_texture_from_path(target_img_path, 0, GL_READ_WRITE)
 
         self.num_pixels = self.width * self.height
 
@@ -170,8 +165,8 @@ class ShaderPipeline:
         # Will be set later
         self.tets_buf = None # 3
         self.hull_buf = None # 4
-        self.filament_order_buf = None  # 7
-        self.out_layers_buf = None      # 8
+        self.filament_order_buf = None  # 3
+        self.out_layers_buf = None      # 4
 
     def dispatch_shader(self, shader_path):
         shader = load_compute_shader(shader_path)
@@ -222,43 +217,109 @@ class ShaderPipeline:
         self.dispatch_shader('shaders_compute/blend_colors.comp')
         read_and_save_tex(self.target_tex, "output/blended.png", self.width, self.height)
 
-    def run_raymarching(self, filament_order):
-        # 0: voxel_data         - 3d representation of the filament
-        # 1: base_points
-        # 2: base_points_alpha
-
-        # 1) Read back the SSBO into a (W*H*N,) array
-        n = len(filament_order)
+        # Read back the SSBO into a (W*H*N,) array
         flat = copy_shader_buffer(self.out_layers_buf, np.int32, self.num_pixels * n)
         layers = flat.reshape((self.height, self.width, n))
+        return layers
+    
+    def run_layer_envelope(self, slice, mode):
+        # 0: uA         - 2d slice with layer thickness values
+        # 1: uPrev      - copy of the slice
+        # 2: uNext      - copy of the slice (output)
+        # 3: uMode      - calculate lower or upper envelope
+        H, W = slice.shape
+        prog = load_compute_shader("shaders_compute/morph.comp")
+        glUseProgram(prog)
 
-        # 2) Build the voxel grid: uint8 IDs in shape (W, H, D)
-        #    Depth is the max over all pixel-layer sums
-        depth = int(np.max(np.sum(layers, axis=2)))
-        self.volume_dimensions = (self.width, self.height, depth)
-        voxel_data = np.full((self.height, self.width, depth), 255, dtype=np.uint8)
+        # textures
+        texA = save_texture(slice.copy(), np.float32)
+        texPrev = save_texture(slice.copy(), np.float32)
+        texNext = save_texture(slice.copy(), np.float32)
 
-        for y in range(self.height):
-            for x in range(self.width):
-                z = 0
-                for i, thickness in enumerate(layers[y, x]):
-                    if thickness <= 0:
-                        continue
-                    
-                    fil_id = filament_order[i]
-                    # fill `thickness` voxels with `fil_id`
-                    end = min(depth, z + thickness)
-                    voxel_data[y, x, z:end] = fil_id
-                    z = end
+        # uniforms
+        loc_mode = glGetUniformLocation(prog, "uMode")
+        loc_dist_method = glGetUniformLocation(prog, "uDistMethod")
+        loc_max_gradient = glGetUniformLocation(prog, "uMaxGradient")
+        flag_ssbo = create_ssbo(3, np.array([0], np.uint32), np.uint32)
+
+        # set uniforms
+        glUniform1i(loc_mode, mode)
+        glUniform1i(loc_dist_method, 0)
+        glUniform1f(loc_max_gradient, 1.0)
+        glBindImageTexture(0, texA,    0, GL_FALSE, 0, GL_READ_ONLY,  GL_R32F)
+
+        for i in range(10000):
+            # bind images
+            glBindImageTexture(1, texPrev, 0, GL_FALSE, 0, GL_READ_ONLY,  GL_R32F)
+            glBindImageTexture(2, texNext, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F)
+
+            # dispatch
+            gx = (W + 15) // 16
+            gy = (H + 15) // 16
+            glDispatchCompute(gx, gy, 1)
+            glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT)
+
+            # swap ping-pong
+            texPrev, texNext = texNext, texPrev
+
+            # check for changes
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, flag_ssbo)
+            flag_value = copy_shader_buffer(flag_ssbo, np.uint32, 1)
+
+            if flag_value[0] == 0:
+                print(f"converged after {i} passes")
+                break
+
+            # clear the flag
+            zero = np.array(0, dtype=np.uint32)
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, flag_ssbo)
+            glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 4, zero)
+
+        # read the result
+        arr = read_tex(texNext, W, H, np.float32)
+
+        return arr
+    
+    def run_average(self, arr1, arr2):
+        # 0: uInput1
+        # 1: uInput2
+        H, W = arr1.shape
+        prog = load_compute_shader("shaders_compute/average.comp")
+        glUseProgram(prog)
         
-        # Convert to (depth, height, width) using np.transpose
-        voxel_data = np.transpose(voxel_data, (2, 0, 1))
+        # textures
+        texA    = save_texture(arr1, np.float32)
+        texB    = save_texture(arr2, np.float32)
 
-        # 3) Upload as 3D texture bound at unit 9
-        self.voxel_tex = bind_3d_texture_as_sampler(voxel_data)
+        # uniforms
+        loc_mode = glGetUniformLocation(prog, "uMode")
 
-        # 4) return the tex_id and dimensions
-        return self.voxel_tex, self.volume_dimensions
+        # set uniforms
+        glUniform1i(loc_mode, 0)
+        glBindImageTexture(0, texA,    0, GL_FALSE, 0, GL_READ_ONLY,  GL_R32F)
+        glBindImageTexture(1, texB,    0, GL_FALSE, 0, GL_READ_ONLY,  GL_R32F)
+
+        # dispatch
+        gx = (W + 15) // 16
+        gy = (H + 15) // 16
+        glDispatchCompute(gx, gy, 1)
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT)
+
+        # read the result
+        arr = read_tex(texA, W, H, np.float32)
+
+        return arr
+
+    def run_smoothing(self, slice):
+        lower_arr = self.run_layer_envelope(slice, 0)
+        upper_arr = self.run_layer_envelope(slice, 0)
+
+        average_arr = self.run_average(lower_arr, upper_arr)
+        return average_arr
+
+
+
+
 
     def get_texture_dimensions(self):
         return self.width, self.height

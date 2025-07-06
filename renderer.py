@@ -4,6 +4,36 @@ from OpenGL.GL import *
 from OpenGL.GL.shaders import compileShader, compileProgram
 import glfw
 
+from main_dispatcher import get_glsl_format
+
+
+def bind_3d_texture_as_sampler(data_slices):
+    dtype = data_slices.dtype
+    internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
+
+    d, h, w = data_slices.shape
+    data_flat = data_slices.flatten()
+    tex = glGenTextures(1)
+    tex = int(tex)
+    glBindTexture(GL_TEXTURE_3D, tex)
+
+    # No alignment padding
+    # glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+
+    # Allocate storage
+    glTexStorage3D(GL_TEXTURE_3D, 1, internal_format, w, h, d)
+    # Upload your uint8 ID data
+    glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, w, h, d,
+                    pixel_format, pixel_type, data_flat)
+
+    # Nearest‐neighbor, no interpolation
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE)
+
+    return tex
 
 class VolumeRenderer:
     def __init__(self, window, w_width, w_height, vert_path, frag_path):
@@ -64,10 +94,9 @@ class VolumeRenderer:
                 self.camera_pos[2] += self.camera_speed  # move backward
 
 
-    def set_volume(self, voxel_tex, volume_size):
+    def set_volume(self, voxel_data):
         """voxel_tex: GL texture ID bound at unit 0; volume_size: (W,H,D) in world units"""
-        self.voxel_tex   = voxel_tex
-        self.volume_size = volume_size
+        self.voxel_tex = bind_3d_texture_as_sampler(voxel_data)
         # Texture unit 0 → sampler binding 0 in GLSL
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_3D, self.voxel_tex)

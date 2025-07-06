@@ -133,7 +133,7 @@ for i in range(1, num_layers - 1):
     print(f"Layer {i} values:\n{layer}\n")
     elevation = offset + layer
     elevation_smooth = pipeline.run_smoothing(elevation)
-    elevation_smooth = np.astype(elevation_smooth, np.int32)
+    elevation_smooth = np.maximum(np.astype(elevation_smooth, np.int32), offset)
     layer_smooth = elevation_smooth - offset
     print("min: ", np.min(layer_smooth))
     layers[:, :, i] = layer_smooth
@@ -154,7 +154,7 @@ renderer = VolumeRenderer(
     win_w,
     win_h,
     'shaders_render/fullscreen.vert',
-    'shaders_render/blend_voxels.frag'
+    'shaders_render/raymarch.frag'
 )
 print("volume_dimensions: ", volume_dimensions)
 renderer.set_volume(voxel_data)

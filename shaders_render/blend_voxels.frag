@@ -25,8 +25,7 @@ void main() {
     float depth = volumeSize.z;
 
     vec3 accum = vec3(0.0);
-    // for(float i = 0; i < depth; i++) {
-    for(float i = depth - 1.0; i >= 0; i--) {
+    for(float i = 0; i < depth; i++) {
         vec3 tc = vec3(uv, i / depth);
         uint fid = texture(voxelData, tc).r;
         if(fid == 255) continue;

@@ -191,7 +191,7 @@ class ShaderPipeline:
         self.tets_buf = create_update_ssbo(self.tets_buf, 3, np.array(tets, dtype=np.int32), np.int32)
         self.hull_buf = create_update_ssbo(self.hull_buf, 4, np.array(hull_tris, dtype=np.int32), np.int32)
 
-        self.dispatch_shader('./mix_colors.comp')
+        self.dispatch_shader('shaders_compute/mix_colors.comp')
 
         # Read back results
         indices = copy_shader_buffer(self.output_indices, np.int32, self.num_pixels * 4)
@@ -219,7 +219,7 @@ class ShaderPipeline:
         n = len(filament_order)
         self.out_layers_buf = create_update_ssbo(self.out_layers_buf, 4, np.zeros(self.num_pixels * n, dtype=np.int32), np.int32)
 
-        self.dispatch_shader('./blend_colors.comp')
+        self.dispatch_shader('shaders_compute/blend_colors.comp')
         read_and_save_tex(self.target_tex, "output/blended.png", self.width, self.height)
 
     def run_raymarching(self, filament_order):

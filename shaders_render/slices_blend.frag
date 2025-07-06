@@ -25,19 +25,21 @@ void main() {
     uv = vec2(uv.x, 1.0 - uv.y);
 
     float depth = uVolumeSize.z;           // number of slices
-    float speed = 1.0;                     // slices per second
-    float z = mod(uTime * speed, 1.0);
-    // float z = 0;
+    float speed = 0.5;                     // slices per second
+    float maxZ = depth * mod(uTime * speed, 1.0);
 
-    // fetch filament ID
-    uint fid = texture(voxelData, vec3(uv, z)).r;
+    // blend colors
+    vec3 accum = vec3(0.0);
+    for(float i = 0; i < maxZ; i++) {
+        vec3 tc = vec3(uv, i / depth);
+        uint fid = texture(voxelData, tc).r;
+        if(fid == 255) continue;
 
-    fragColor = vec4(vec3(float(fid) / 255.0), 1.0);
+        vec3 col = base_points[fid];
+        float a1 = base_points_alpha[fid];
 
-    // look up color (255 means "empty")
-    vec3 col = (fid == 255u) 
-               ? vec3(0.0) 
-               : base_points[fid];
+        accum = mix(accum, col, a1);
+    }
 
-    fragColor = vec4(col, 1.0);
+    fragColor = vec4(accum, 1.0);
 }

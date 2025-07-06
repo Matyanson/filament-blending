@@ -44,7 +44,6 @@ def alpha_from_td(thickness, td):
     """
     return 1 - np.exp(-thickness / td)
 
-target_image = Image.open('./input/target_200.png').convert('RGB')
 filament_colors = []
 base_points = []
 base_points_alpha = []
@@ -73,11 +72,12 @@ base_points_alpha = np.array(base_points_alpha)
 # --- MAIN ---
 
 # setup glsl context
-win_w = 500
-win_h = 500
+win_w = 1000
+win_h = 1000
 glfw.init()
 window = glfw.create_window(win_w, win_h, "Voxel Renderer", None, None)
 glfw.make_context_current(window)
+glfw.swap_interval(1)
 
 
 # 1) CPU: calculate Delaunay
@@ -125,7 +125,7 @@ voxel_tex, volume_dimensions = pipeline.run_raymarching(filament_order)
 
 W, H, D = volume_dimensions  # (512, 512, 29)
 center = np.array([W/2, H/2, D/2], dtype=np.float32)  # (256,256,14.5)
-eye    = np.array([center[0], center[1], 300.0], dtype=np.float32)
+eye    = np.array([center[0], center[1], 100.0], dtype=np.float32)
 up     = np.array([0, 0, 1], dtype=np.float32)
 view_mat = look_at(eye, center, up)
 
@@ -141,8 +141,8 @@ renderer = VolumeRenderer(
     window,
     win_w,
     win_h,
-    'fullscreen.vert',
-    'raymarch.frag'
+    'shaders_render/fullscreen.vert',
+    'shaders_render/slices_blend.frag'
 )
 print("volume_dimensions: ", volume_dimensions)
 renderer.set_volume(voxel_tex, volume_dimensions)
@@ -156,6 +156,7 @@ pipeline.cleanup()
 
 
 print("filament_order: ", filament_order)
+print("filament colors:", filament_colors)
 print("Unique filament indices used:", unique_indices)
 
 print(len(base_points), len(unique_indices))

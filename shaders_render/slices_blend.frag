@@ -16,15 +16,16 @@ layout(std430, binding = 2) buffer BasePointsAlpha {
 
 // Camera & screen uniforms
 uniform ivec2 uScreenSize;       // viewport resolution
-uniform vec3 uVolumeSize;        // world-space size of the voxel block
 uniform float uTime;             // elapsed time in seconds
 
 void main() {
+    vec3 volumeSize = vec3(textureSize(voxelData, 0));
+
     // normalized pixel coords
     vec2 uv = gl_FragCoord.xy / vec2(uScreenSize);
     uv = vec2(uv.x, 1.0 - uv.y);
 
-    float depth = uVolumeSize.z;           // number of slices
+    float depth = volumeSize.z;           // number of slices
     float speed = 0.5;                     // slices per second
     float maxZ = depth * mod(uTime * speed, 1.0);
 

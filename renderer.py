@@ -33,6 +33,8 @@ class VolumeRenderer:
         self.w_width  = w_width
         self.w_height = w_height
 
+        self.camera_pos = np.array([0, 0, 100.0], dtype=np.float32)
+
         # 6) Build fullscreen-quad shader
         vert_src = open(vert_path).read()
         frag_src = open(frag_path).read()
@@ -46,12 +48,13 @@ class VolumeRenderer:
         glBindVertexArray(self.quad_vao)
 
         # 8) Pre-cache uniform locations
-        self.uInvViewProj_loc = glGetUniformLocation(self.prog, 'uInvViewProj')
         self.uCameraPos_loc   = glGetUniformLocation(self.prog, 'uCameraPos')
         self.uScreenSize_loc  = glGetUniformLocation(self.prog, 'uScreenSize')
-        self.uVolumeSize_loc  = glGetUniformLocation(self.prog, 'uVolumeSize')
         self.uStepSize_loc    = glGetUniformLocation(self.prog, 'uStepSize')
         self.uTime_loc        = glGetUniformLocation(self.prog, 'uTime')
+
+        # 9) set uniforms
+        glUniform2i(self.uScreenSize_loc,  self.w_width, self.w_height)
 
 
     def set_volume(self, voxel_tex, volume_size):
@@ -65,9 +68,8 @@ class VolumeRenderer:
         glUniform1i(glGetUniformLocation(self.prog, "voxelData"), 0)
 
 
-    def set_camera(self, view_mat, proj_mat):
-        self.invVP      = np.linalg.inv(proj_mat @ view_mat).astype(np.float32)
-        self.camera_pos = eye_position_from(view_mat).astype(np.float32)
+    def set_camera(self, camera_pos):
+        self.camera_pos = camera_pos
 
     def render_frame(self, step_size=1.0):
         # Bind shader & VAO
@@ -75,10 +77,7 @@ class VolumeRenderer:
         glBindVertexArray(self.quad_vao)
 
         # Upload uniforms
-        glUniformMatrix4fv(self.uInvViewProj_loc, 1, GL_FALSE, self.invVP)
         glUniform3f(self.uCameraPos_loc,   *self.camera_pos)
-        glUniform2i(self.uScreenSize_loc,  self.w_width, self.w_height)
-        glUniform3f(self.uVolumeSize_loc,  *self.volume_size)
         glUniform1f(self.uStepSize_loc,    step_size)
         glUniform1f(self.uTime_loc,    glfw.get_time())
 

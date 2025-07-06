@@ -19,7 +19,7 @@ uniform ivec2 uScreenSize;       // viewport resolution
 
 void main() {
     vec3 volumeSize = vec3(textureSize(voxelData, 0));
-    // debug
+    
     vec2 uv = gl_FragCoord.xy / vec2(uScreenSize);
     uv = vec2(uv.x, 1.0 - uv.y);
     float depth = volumeSize.z;

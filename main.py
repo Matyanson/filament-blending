@@ -124,29 +124,18 @@ pipeline.run_blend_colors(filament_order)
 voxel_tex, volume_dimensions = pipeline.run_raymarching(filament_order)
 
 W, H, D = volume_dimensions  # (512, 512, 29)
-center = np.array([W/2, H/2, D/2], dtype=np.float32)  # (256,256,14.5)
-eye    = np.array([center[0], center[1], 100.0], dtype=np.float32)
-up     = np.array([0, 0, 1], dtype=np.float32)
-view_mat = look_at(eye, center, up)
-
-# projection
-fovy    = np.radians(45.0)
-aspect  = W / H
-znear   = 0.1
-zfar    = np.linalg.norm([W, H, D]) * 3.0
-
-proj_mat = perspective(fovy, aspect, znear, zfar)
+camera_pos    = np.array([W/2, H/2, 300.0], dtype=np.float32)
 
 renderer = VolumeRenderer(
     window,
     win_w,
     win_h,
     'shaders_render/fullscreen.vert',
-    'shaders_render/slices_blend.frag'
+    'shaders_render/raymarch.frag'
 )
 print("volume_dimensions: ", volume_dimensions)
 renderer.set_volume(voxel_tex, volume_dimensions)
-renderer.set_camera(view_mat, proj_mat)
+renderer.set_camera(camera_pos)
 
 while not glfw.window_should_close(window):
     renderer.render_frame(step_size=0.5)

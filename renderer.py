@@ -5,22 +5,6 @@ from OpenGL.GL.shaders import compileShader, compileProgram
 import glfw
 
 
-def eye_position_from(view_mat: np.ndarray) -> np.ndarray:
-    """
-    Given a 4×4 view matrix (camera transform world→view),
-    returns the world‐space camera position (the “eye”).
-    This is simply the inverse‐transform of the origin.
-
-    :param view_mat: 4×4 numpy array
-    :return: 3‐element numpy array camera position
-    """
-    # Invert the view matrix to get view→world
-    inv = np.linalg.inv(view_mat)
-    # The world‐space position of the camera is where the view‐space origin maps to:
-    # inv @ [0,0,0,1]^T
-    eye_homog = inv @ np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
-    return eye_homog[:3] / eye_homog[3]
-
 class VolumeRenderer:
     def __init__(self, window, w_width, w_height, vert_path, frag_path):
         # 2) Set window hints for a core profile
@@ -28,12 +12,16 @@ class VolumeRenderer:
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 
-        # 5) Store screen info
+        # 5) Store screen & control info
         self.window = window
         self.w_width  = w_width
         self.w_height = w_height
 
         self.camera_pos = np.array([0, 0, 100.0], dtype=np.float32)
+        self.camera_speed = 1.0
+
+        # Set controller key callback
+        glfw.set_key_callback(window, self.key_callback)
 
         # 6) Build fullscreen-quad shader
         vert_src = open(vert_path).read()
@@ -55,6 +43,25 @@ class VolumeRenderer:
 
         # 9) set uniforms
         glUniform2i(self.uScreenSize_loc,  self.w_width, self.w_height)
+
+    def key_callback(self, window, key, scancode, action, mods):
+        if(action == glfw.REPEAT):
+            self.camera_speed = min(self.camera_speed + 0.1, 100.0)
+        else: self.camera_speed = 1.0
+
+        if action == glfw.PRESS or action == glfw.REPEAT:
+            if key == glfw.KEY_UP:
+                self.camera_pos[1] -= self.camera_speed  # move up
+            elif key == glfw.KEY_DOWN:
+                self.camera_pos[1] += self.camera_speed  # move down
+            elif key == glfw.KEY_LEFT:
+                self.camera_pos[0] -= self.camera_speed  # move left
+            elif key == glfw.KEY_RIGHT:
+                self.camera_pos[0] += self.camera_speed  # move right
+            elif key == glfw.KEY_W:
+                self.camera_pos[2] -= self.camera_speed  # move forward
+            elif key == glfw.KEY_S:
+                self.camera_pos[2] += self.camera_speed  # move backward
 
 
     def set_volume(self, voxel_tex, volume_size):

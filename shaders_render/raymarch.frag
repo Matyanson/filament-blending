@@ -69,7 +69,7 @@ void main() {
     vec3 pos = rayOrigin + rayDir * (t + 0.001);
     vec4 accum = vec4(0.0);  // RGBA accumulation
 
-    for (int i = 0; i < 512; i++) {
+    for (int i = 0; i < 100000; i++) {
         // 3a) Compute normalized texture coords [0,1]
         vec3 tc = pos / volumeSize;
         if (any(lessThan(tc, vec3(0.0))) || any(greaterThan(tc, vec3(1.0)))) {

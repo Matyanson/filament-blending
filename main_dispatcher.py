@@ -334,7 +334,7 @@ class ShaderPipeline:
 
     def run_smoothing(self, slice):
         lower_arr = self.run_layer_envelope(slice, 0)
-        upper_arr = self.run_layer_envelope(slice, 0)
+        upper_arr = self.run_layer_envelope(slice, 1)
 
         average_arr = self.run_average(lower_arr, upper_arr)
         return average_arr

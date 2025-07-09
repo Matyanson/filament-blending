@@ -25,23 +25,23 @@ def get_glsl_format(dtype):
     
     return format_map[scalar_type]
 
-def bind_image_texture_from_path(path, binding_index, access=GL_READ_ONLY):    
+def read_image_from_path(path):
     img = Image.open(path).convert('RGBA')
     img_data = np.array(img).astype(np.uint8)
-    height, width = img_data.shape[:2]
+    return img_data
 
+def save_texture_rbg8(img_data):
+    H, W = img_data.shape[:2]
     tex = glGenTextures(1)
     glBindTexture(GL_TEXTURE_2D, tex)
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, height)
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, W, H)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, W, H,
                     GL_RGBA, GL_UNSIGNED_BYTE, img_data)
+    return tex
 
-    # Bind as image2D instead of sampler2D
-    glBindImageTexture(binding_index, tex, 0, GL_FALSE, 0, access, GL_RGBA8)
-
-    return width, height, tex
-
-def save_texture(img_data, dtype):
+def save_texture_r(img_data, dtype):
     internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
 
     H, W = img_data.shape[:2]
@@ -149,14 +149,14 @@ class ShaderPipeline:
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
 
-        # Image input and output
-        self.width, self.height, self.target_tex = bind_image_texture_from_path(target_img_path, 0, GL_READ_WRITE)
-
+        # input
+        self.input_img_data = read_image_from_path(target_img_path)
+        self.height, self.width = self.input_img_data.shape[:2]
         self.num_pixels = self.width * self.height
-
-        # Input SSBOs (persist across shaders)
-        create_ssbo(1, np.array(base_points, dtype=np.float32), np.float32)
-        create_ssbo(2, np.array(base_points_alpha, dtype=np.float32), np.float32)
+        
+        self.base_points = base_points
+        self.base_points_alpha = base_points_alpha
+        self.init_input()
 
         # Output buffers shared by both shaders
         self.output_indices = create_ssbo(5, np.zeros((self.num_pixels, 4), dtype=np.int32), np.int32)
@@ -167,6 +167,14 @@ class ShaderPipeline:
         self.hull_buf = None # 4
         self.filament_order_buf = None  # 3
         self.out_layers_buf = None      # 4
+
+    def init_input(self):
+        self.target_tex = save_texture_rbg8(self.input_img_data)
+        glBindImageTexture(0, self.target_tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA8)
+
+        # Input SSBOs (persist across shaders)
+        create_ssbo(1, np.array(self.base_points, dtype=np.float32), np.float32)
+        create_ssbo(2, np.array(self.base_points_alpha, dtype=np.float32), np.float32)
 
     def dispatch_shader(self, shader_path):
         shader = load_compute_shader(shader_path)
@@ -208,11 +216,12 @@ class ShaderPipeline:
         # 6: out_bary           - input
 
         # Input buffers
-        self.filament_order_buf = create_update_ssbo(self.filament_order_buf, 3, np.array(filament_order, dtype=np.int32), np.int32)
+        self.init_input()
+        self.filament_order_buf = create_ssbo(3, np.array(filament_order, dtype=np.int32), np.int32)
 
         # Output buffers
         n = len(filament_order)
-        self.out_layers_buf = create_update_ssbo(self.out_layers_buf, 4, np.zeros(self.num_pixels * n, dtype=np.int32), np.int32)
+        self.out_layers_buf = create_ssbo(4, np.zeros(self.num_pixels * n, dtype=np.int32), np.int32)
 
         self.dispatch_shader('shaders_compute/blend_colors.comp')
         read_and_save_tex(self.target_tex, "output/blended.png", self.width, self.height)
@@ -248,15 +257,16 @@ class ShaderPipeline:
         # 0: uA         - 2d slice with layer thickness values
         # 1: uPrev      - copy of the slice
         # 2: uNext      - copy of the slice (output)
-        # 3: uMode      - calculate lower or upper envelope
+        # 3: converged_flag
+        # uMode         - calculate lower or upper envelope
         H, W = slice.shape
         prog = load_compute_shader("shaders_compute/morph.comp")
         glUseProgram(prog)
 
         # textures
-        texA = save_texture(slice.copy(), np.float32)
-        texPrev = save_texture(slice.copy(), np.float32)
-        texNext = save_texture(slice.copy(), np.float32)
+        texA = save_texture_r(slice.copy(), np.float32)
+        texPrev = save_texture_r(slice.copy(), np.float32)
+        texNext = save_texture_r(slice.copy(), np.float32)
 
         # uniforms
         loc_mode = glGetUniformLocation(prog, "uMode")
@@ -310,8 +320,8 @@ class ShaderPipeline:
         glUseProgram(prog)
         
         # textures
-        texA    = save_texture(arr1, np.float32)
-        texB    = save_texture(arr2, np.float32)
+        texA    = save_texture_r(arr1, np.float32)
+        texB    = save_texture_r(arr2, np.float32)
 
         # uniforms
         loc_mode = glGetUniformLocation(prog, "uMode")

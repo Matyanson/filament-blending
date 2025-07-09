@@ -33,7 +33,7 @@ filaments = {
 }
 
 layer_thickness = 0.2  # mm per layer
-target_colors = np.vstack(([0.3, 0.7, 0.5], np.random.rand(11, 3)))
+max_filaments = 3
 
 
 # --- SETUP ---
@@ -89,7 +89,7 @@ hull = ConvexHull(S)
 tets = delaunay.simplices  # shape (n, 4), each tet is a list of 4 vertex indices
 hull_tris = hull.simplices  # shape (m, 3), each triangle is a list of 3 vertex indices
 
-# Setup shader pipeline
+# 1) Setup shader pipeline
 pipeline = ShaderPipeline(
     target_img_path='./input/target_512.png',
     base_points=base_points,
@@ -98,7 +98,7 @@ pipeline = ShaderPipeline(
 
 width, height = pipeline.get_texture_dimensions()
 
-# Mix colors
+# 2) Mix colors
 result_indices, result_coords = pipeline.run_mix_colors(tets, hull_tris)
 
 
@@ -110,19 +110,36 @@ for row in result_indices.reshape(-1, 4):
         if idx >= 0:  # Skip unused (-1) entries
             unique_indices.add(idx)
 
-# 4) calculate filament order (most opaque at the bottom=0)
 unique_indices = list(unique_indices)
+
+# 3.5) reduce number of filaments used
+# GET THE COLOR VOLUME %
+contributions = pipeline.run_get_color_contribution(unique_indices)
+
+color_percentages = contributions.sum(axis=(0, 1))
+color_percentages /= (width * height)
+
+unique_indices = sorted(unique_indices, key=lambda index: color_percentages[index], reverse=True)
+
+if(len(unique_indices) > max_filaments):
+    unique_indices = unique_indices[:max_filaments]
+
+
+
+# 4) calculate filament order (most opaque at the bottom=0)
 filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'], reverse=True)
+# filament_order = sorted(unique_indices, key=lambda index: color_percentages[index])
+
 
 # 5) Find the optimal filament thickness for color blending (layers)
 layers = pipeline.run_blend_colors(filament_order)
+
 
 # 6) modify layers to be compatible with 3d printing
 
 # 6.1: flatten 0th layer
 max0 = layers[:, :, 0].max()
 layers[:, :, 0] = max0
-print(f"Layer {0} values:\n{layers[:, :, 0]}\n")
 
 # 6.2: smoothen layers that are not 0 or n-1
 offset = layers[:, :, 0].copy()
@@ -130,14 +147,11 @@ num_layers = layers.shape[2]
 
 for i in range(1, num_layers - 1):
     layer = layers[:, :, i]
-    print(f"Layer {i} values:\n{layer}\n")
     elevation = offset + layer
     elevation_smooth = pipeline.run_smoothing(elevation)
     elevation_smooth = np.maximum(np.astype(elevation_smooth, np.int32), offset)
     layer_smooth = elevation_smooth - offset
-    print("min: ", np.min(layer_smooth))
     layers[:, :, i] = layer_smooth
-    print(f"Layer {i} SMOOTH values:\n{layer}\n{'-'*40}\n")
     offset = elevation_smooth
 
 

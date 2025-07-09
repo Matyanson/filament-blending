@@ -95,7 +95,7 @@ def create_ssbo(binding_index, data, dtype=np.float32):
 def update_ssbo(buf_id, data, dtype):
     arr = base_align_data(data, dtype)
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, buf_id)
-    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, arr.nbytes, arr)
+    glBufferData(GL_SHADER_STORAGE_BUFFER, arr.nbytes, arr, GL_DYNAMIC_DRAW)
 
 def create_update_ssbo(buf_id, binding_index, data, dtype=np.float32):
     if(buf_id is None):
@@ -204,8 +204,8 @@ class ShaderPipeline:
         # 2: base_points_alpha
         # 3: filament_order
         # 4: out_layers         - thickness of each filament layer
-        # 5: out_indexes
-        # 6: out_bary
+        # 5: out_indexes        - input
+        # 6: out_bary           - input
 
         # Input buffers
         self.filament_order_buf = create_update_ssbo(self.filament_order_buf, 3, np.array(filament_order, dtype=np.int32), np.int32)
@@ -221,6 +221,28 @@ class ShaderPipeline:
         flat = copy_shader_buffer(self.out_layers_buf, np.int32, self.num_pixels * n)
         layers = flat.reshape((self.height, self.width, n))
         return layers
+    
+    def run_get_color_contribution(self, filament_order):
+        # 0: target_image
+        # 1: base_points
+        # 3: filament_order
+        # 4: out_contributions  - % of each filament's color contribution for each pixel
+        # 5: out_indexes        - input
+        # 6: out_bary           - input
+
+        # Input buffers
+        self.filament_order_buf = create_update_ssbo(self.filament_order_buf, 3, np.array(filament_order, dtype=np.int32), np.int32)
+
+        # Output buffers
+        n = len(filament_order)
+        out_contributions_buf = create_ssbo(4, np.zeros(self.num_pixels * n, dtype=np.float32), np.float32)
+
+        self.dispatch_shader('shaders_compute/color_contrib.comp')
+
+        # Read back the SSBO into a (W*H*N,) array
+        flat = copy_shader_buffer(out_contributions_buf, np.float32, self.num_pixels * n)
+        contributions = flat.reshape((self.height, self.width, n))
+        return contributions
     
     def run_layer_envelope(self, slice, mode):
         # 0: uA         - 2d slice with layer thickness values

@@ -121,14 +121,34 @@ color_percentages /= (width * height)
 
 unique_indices = sorted(unique_indices, key=lambda index: color_percentages[index], reverse=True)
 
-if(len(unique_indices) > max_filaments):
-    unique_indices = unique_indices[:max_filaments]
+# if(len(unique_indices) > max_filaments):
+#     unique_indices = unique_indices[:max_filaments]
 
 
 
 # 4) calculate filament order (most opaque at the bottom=0)
-filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'], reverse=True)
+# filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'], reverse=True)
 # filament_order = sorted(unique_indices, key=lambda index: color_percentages[index])
+
+filament_error = []
+for fid in unique_indices:
+    layers = pipeline.run_blend_colors([fid])
+    layer = layers[:, :, 0]
+    min = np.min(layer)
+    max = np.max(layer)
+
+    layer_smooth = pipeline.run_smoothing(layer)
+    layer_error = np.abs(layer - layer_smooth)
+    error = np.sum(layer_error)
+    filament_error.append(error)
+
+print(unique_indices)
+print(filament_error)
+
+filament_order = sorted(enumerate(unique_indices), key=lambda pair: filament_error[pair[1]])
+filament_order = [fid for idx, fid in filament_order]
+
+
 
 
 # 5) Find the optimal filament thickness for color blending (layers)
@@ -184,5 +204,3 @@ pipeline.cleanup()
 print("filament_order: ", filament_order)
 print("filament colors:", filament_colors)
 print("Unique filament indices used:", unique_indices)
-
-print(len(base_points), len(unique_indices))

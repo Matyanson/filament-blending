@@ -91,7 +91,7 @@ hull_tris = hull.simplices  # shape (m, 3), each triangle is a list of 3 vertex 
 
 # 1) Setup shader pipeline
 pipeline = ShaderPipeline(
-    target_img_path='./input/target_512.png',
+    target_img_path='./input/wolf1.jpg',
     base_points=base_points,
     base_points_alpha=base_points_alpha
 )
@@ -142,11 +142,14 @@ for fid in unique_indices:
     error = np.sum(layer_error)
     filament_error.append(error)
 
-print(unique_indices)
-print(filament_error)
-
 filament_order = sorted(enumerate(unique_indices), key=lambda pair: filament_error[pair[1]])
-filament_order = [fid for idx, fid in filament_order]
+filament_order = [fid for i, fid in filament_order]
+
+
+filament_order = [int(fid) for fid in filament_order]
+
+
+
 
 
 
@@ -175,14 +178,17 @@ for i in range(1, num_layers - 1):
     offset = elevation_smooth
 
 
-
-
 # FINAL: render the 3d volume!
 voxel_data, volume_dimensions = get_voxel_volume(filament_order, layers)
 
-W, H, D = volume_dimensions  # (512, 512, 29)
-camera_pos    = np.array([W/2, H/2, 300.0], dtype=np.float32)
+pipeline.init_input()
+pipeline.set_volume(voxel_data)
+pipeline.save_volume_screenshot(f"blend{list(filament_order)}.png")
 
+W, H, D = volume_dimensions  # (512, 512, 29)
+print("volume_dimensions: ", volume_dimensions)
+
+camera_pos    = np.array([W/2, H/2, 300.0], dtype=np.float32)
 renderer = VolumeRenderer(
     window,
     win_w,
@@ -190,12 +196,11 @@ renderer = VolumeRenderer(
     'shaders_render/fullscreen.vert',
     'shaders_render/raymarch.frag'
 )
-print("volume_dimensions: ", volume_dimensions)
-renderer.set_volume(voxel_data)
 renderer.set_camera(camera_pos)
+renderer.set_volume(0, voxel_data)
 
 while not glfw.window_should_close(window):
-    renderer.render_frame(step_size=0.5)
+    renderer.render_frame(step_size=0.1)
 
 renderer.cleanup()
 pipeline.cleanup()

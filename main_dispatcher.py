@@ -300,7 +300,7 @@ class ShaderPipeline:
         # set uniforms
         glUniform1i(loc_mode, mode)
         glUniform1i(loc_dist_method, 0)
-        glUniform1f(loc_max_gradient, 1.0)
+        glUniform1f(loc_max_gradient, 1.0) # 0.4 maybe? no no 1/0.4 = 2.5
         glBindImageTexture(0, texA,    0, GL_FALSE, 0, GL_READ_ONLY,  GL_R32F)
 
         for i in range(10000):
@@ -322,7 +322,6 @@ class ShaderPipeline:
             flag_value = copy_shader_buffer(flag_ssbo, np.uint32, 1)
 
             if flag_value[0] == 0:
-                print(f"converged after {i} passes")
                 break
 
             # clear the flag
@@ -373,6 +372,21 @@ class ShaderPipeline:
         return average_arr
 
 
+    def save_volume_screenshot(self, img_name):
+        # Bind shader
+        prog = load_compute_shader("shaders_compute/blend_voxels.comp")
+        glUseProgram(prog)
+
+        # bind output texture
+        output_tex = save_texture_rbg8(np.zeros((self.height, self.width, 4), dtype=np.uint8))
+        glBindImageTexture(0, output_tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA8)
+
+        # dispatch
+        glDispatchCompute((self.width + 15) // 16, (self.height + 15) // 16, 1)
+        glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT)
+
+        # save resulting texture
+        read_and_save_tex(output_tex, f"output/{img_name}", self.width, self.height)
 
 
 

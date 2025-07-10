@@ -54,20 +54,38 @@ def save_texture_r(img_data, dtype):
                     pixel_format, pixel_type, img_data)
     return tex
 
-def bind_3d_texture(binding_index, data, access=GL_READ_ONLY):
-    
-    dtype = data.dtype
+
+def set_3d_texture_as_sampler(data_slices):
+    dtype = data_slices.dtype
     internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
 
-    height, width, depth = data.shape
+    d, h, w = data_slices.shape
+    data_flat = data_slices.flatten()
     tex = glGenTextures(1)
+    tex = int(tex)
     glBindTexture(GL_TEXTURE_3D, tex)
-    glTexImage3D(GL_TEXTURE_3D, 0, internal_format,
-                 width, height, depth, 0,
-                 pixel_format, pixel_type, data)
-    glBindImageTexture(binding_index, tex, 0, GL_TRUE, 0, access, internal_format)
+
+    # No alignment padding
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+
+    # Allocate storage
+    glTexStorage3D(GL_TEXTURE_3D, 1, internal_format, w, h, d)
+    # Upload your uint8 ID data
+    glTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, w, h, d,
+                    pixel_format, pixel_type, data_flat)
+
+    # Nearest‐neighbor, no interpolation
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE)
 
     return tex
+
+def bind_3d_texture(unit, texture):
+    glActiveTexture(GL_TEXTURE0 + unit)
+    glBindTexture(GL_TEXTURE_3D, texture)
 
 def base_align_data(data, dtype):
     arr = data.astype(dtype)
@@ -167,6 +185,7 @@ class ShaderPipeline:
         self.hull_buf = None # 4
         self.filament_order_buf = None  # 3
         self.out_layers_buf = None      # 4
+        self.volume_tex = None #3
 
     def init_input(self):
         self.target_tex = save_texture_rbg8(self.input_img_data)
@@ -175,6 +194,10 @@ class ShaderPipeline:
         # Input SSBOs (persist across shaders)
         create_ssbo(1, np.array(self.base_points, dtype=np.float32), np.float32)
         create_ssbo(2, np.array(self.base_points_alpha, dtype=np.float32), np.float32)
+    
+    def set_volume(self, slices):
+        self.volume_tex = set_3d_texture_as_sampler(slices)
+        bind_3d_texture(3, self.volume_tex)
 
     def dispatch_shader(self, shader_path):
         shader = load_compute_shader(shader_path)

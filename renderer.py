@@ -7,7 +7,7 @@ import glfw
 from main_dispatcher import get_glsl_format
 
 
-def bind_3d_texture_as_sampler(data_slices):
+def set_3d_texture_as_sampler(data_slices):
     dtype = data_slices.dtype
     internal_format, pixel_format, pixel_type = get_glsl_format(dtype)
 
@@ -94,11 +94,12 @@ class VolumeRenderer:
                 self.camera_pos[2] += self.camera_speed  # move backward
 
 
-    def set_volume(self, voxel_data):
+    def set_volume(self, unit, voxel_data):
         """voxel_tex: GL texture ID bound at unit 0; volume_size: (W,H,D) in world units"""
-        self.voxel_tex = bind_3d_texture_as_sampler(voxel_data)
+
+        self.voxel_tex = set_3d_texture_as_sampler(voxel_data)
         # Texture unit 0 → sampler binding 0 in GLSL
-        glActiveTexture(GL_TEXTURE0)
+        glActiveTexture(GL_TEXTURE0 + unit)
         glBindTexture(GL_TEXTURE_3D, self.voxel_tex)
         # Tell your shader to sample from unit 0
         glUniform1i(glGetUniformLocation(self.prog, "voxelData"), 0)

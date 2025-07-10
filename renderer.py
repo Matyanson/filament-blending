@@ -18,7 +18,7 @@ def bind_3d_texture_as_sampler(data_slices):
     glBindTexture(GL_TEXTURE_3D, tex)
 
     # No alignment padding
-    # glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
 
     # Allocate storage
     glTexStorage3D(GL_TEXTURE_3D, 1, internal_format, w, h, d)

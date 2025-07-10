@@ -229,7 +229,7 @@ class ShaderPipeline:
         read_and_save_tex(self.target_tex, "output/mixed.png", self.width, self.height)
         return indices, coords
 
-    def run_blend_colors(self, filament_order):
+    def run_blend_colors(self, filament_order, img_name):
         # 0: target_image
         # 1: base_points
         # 2: base_points_alpha
@@ -247,7 +247,7 @@ class ShaderPipeline:
         self.out_layers_buf = create_ssbo(4, np.zeros(self.num_pixels * n, dtype=np.int32), np.int32)
 
         self.dispatch_shader('shaders_compute/blend_colors.comp')
-        read_and_save_tex(self.target_tex, "output/blended.png", self.width, self.height)
+        read_and_save_tex(self.target_tex, f"output/{img_name}", self.width, self.height)
 
         # Read back the SSBO into a (W*H*N,) array
         flat = copy_shader_buffer(self.out_layers_buf, np.int32, self.num_pixels * n)

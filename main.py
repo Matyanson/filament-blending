@@ -1,3 +1,4 @@
+import itertools
 import math
 import numpy as np
 from skimage import color
@@ -64,6 +65,79 @@ filament_colors = np.array(filament_colors)
 base_points = np.array(base_points)
 base_points_alpha = np.array(base_points_alpha)
 
+# --- FUNCTIONS ---
+def save_all_permutations(unique_indices):
+    unique_indices = [int(fid) for fid in unique_indices]
+
+    for filament_order in itertools.permutations(unique_indices):
+
+        # 5) Find the optimal filament thickness for color blending (layers)
+        layers = pipeline.run_blend_colors(filament_order, f"blend_unrestricted{filament_order}.png")
+
+        # 6) modify layers to be compatible with 3d printing
+
+        # 6.1: flatten 0th layer
+        max0 = layers[:, :, 0].max()
+        layers[:, :, 0] = max0
+
+        # 6.2: smoothen layers that are not 0 or n-1
+        offset = layers[:, :, 0].copy()
+        num_layers = layers.shape[2]
+
+        for i in range(1, num_layers - 1):
+            layer = layers[:, :, i]
+            elevation = offset + layer
+            elevation_smooth = pipeline.run_smoothing(elevation)
+            elevation_smooth = np.maximum(np.astype(elevation_smooth, np.int32), offset)
+            layer_smooth = elevation_smooth - offset
+            layers[:, :, i] = layer_smooth
+            offset = elevation_smooth
+
+
+        # FINAL: render the 3d volume!
+        voxel_data, volume_dimensions = get_voxel_volume(filament_order, layers)
+
+        pipeline.init_input()
+        pipeline.set_volume(voxel_data)
+        pipeline.save_volume_screenshot(f"blend{list(filament_order)}.png")
+
+def get_filament_order(unique_indices):
+    # filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'], reverse=True)
+    # filament_order = sorted(unique_indices, key=lambda index: color_percentages[index])
+    filament_error = []
+    for fid in unique_indices:
+        layers = pipeline.run_blend_colors([fid], "test_err.png")
+        layer = layers[:, :, 0]
+
+        layer_smooth = pipeline.run_smoothing(layer)
+        layer_error = np.abs(layer - layer_smooth)
+        error = np.sum(layer_error)
+        filament_error.append(error)
+
+    filament_order = sorted(enumerate(unique_indices), key=lambda pair: filament_error[pair[1]])
+    filament_order = [fid for i, fid in filament_order]
+
+    return filament_order
+
+def smoothen_layers(layers):
+    # 6.1: flatten 0th layer
+    max0 = layers[:, :, 0].max()
+    layers[:, :, 0] = max0
+
+    # 6.2: smoothen layers that are not 0 or n-1
+    offset = layers[:, :, 0].copy()
+    num_layers = layers.shape[2]
+
+    for i in range(1, num_layers - 1):
+        layer = layers[:, :, i]
+        elevation = offset + layer
+        elevation_smooth = pipeline.run_smoothing(elevation)
+        elevation_smooth = np.maximum(np.astype(elevation_smooth, np.int32), offset)
+        layer_smooth = elevation_smooth - offset
+        layers[:, :, i] = layer_smooth
+        offset = elevation_smooth
+
+
 # --- MAIN ---
 
 # setup glsl context
@@ -113,69 +187,31 @@ for row in result_indices.reshape(-1, 4):
 unique_indices = list(unique_indices)
 
 # 3.5) reduce number of filaments used
-# GET THE COLOR VOLUME %
+# get the color volume %
 contributions = pipeline.run_get_color_contribution(unique_indices)
 
 color_percentages = contributions.sum(axis=(0, 1))
 color_percentages /= (width * height)
 
-unique_indices = sorted(unique_indices, key=lambda index: color_percentages[index], reverse=True)
+# unique_indices = sorted(unique_indices, key=lambda index: color_percentages[index], reverse=True)
 
 # if(len(unique_indices) > max_filaments):
 #     unique_indices = unique_indices[:max_filaments]
 
 
-
 # 4) calculate filament order (most opaque at the bottom=0)
-# filament_order = sorted(unique_indices, key=lambda index: filament_colors[index]['alpha'], reverse=True)
-# filament_order = sorted(unique_indices, key=lambda index: color_percentages[index])
 
-filament_error = []
-for fid in unique_indices:
-    layers = pipeline.run_blend_colors([fid])
-    layer = layers[:, :, 0]
-    min = np.min(layer)
-    max = np.max(layer)
-
-    layer_smooth = pipeline.run_smoothing(layer)
-    layer_error = np.abs(layer - layer_smooth)
-    error = np.sum(layer_error)
-    filament_error.append(error)
-
-filament_order = sorted(enumerate(unique_indices), key=lambda pair: filament_error[pair[1]])
-filament_order = [fid for i, fid in filament_order]
-
-
+filament_order = get_filament_order(unique_indices)
 filament_order = [int(fid) for fid in filament_order]
 
 
-
-
-
-
-
 # 5) Find the optimal filament thickness for color blending (layers)
-layers = pipeline.run_blend_colors(filament_order)
+layers = pipeline.run_blend_colors(filament_order, f"blend_unrestricted{filament_order}.png")
 
 
 # 6) modify layers to be compatible with 3d printing
 
-# 6.1: flatten 0th layer
-max0 = layers[:, :, 0].max()
-layers[:, :, 0] = max0
-
-# 6.2: smoothen layers that are not 0 or n-1
-offset = layers[:, :, 0].copy()
-num_layers = layers.shape[2]
-
-for i in range(1, num_layers - 1):
-    layer = layers[:, :, i]
-    elevation = offset + layer
-    elevation_smooth = pipeline.run_smoothing(elevation)
-    elevation_smooth = np.maximum(np.astype(elevation_smooth, np.int32), offset)
-    layer_smooth = elevation_smooth - offset
-    layers[:, :, i] = layer_smooth
-    offset = elevation_smooth
+smoothen_layers(layers)
 
 
 # FINAL: render the 3d volume!
@@ -208,4 +244,3 @@ pipeline.cleanup()
 
 print("filament_order: ", filament_order)
 print("filament colors:", filament_colors)
-print("Unique filament indices used:", unique_indices)
